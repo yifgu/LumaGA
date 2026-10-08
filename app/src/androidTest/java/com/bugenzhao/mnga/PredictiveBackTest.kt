@@ -20,6 +20,7 @@ import com.bugenzhao.mnga.ui.theme.LumaGATheme
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,6 +28,34 @@ import org.junit.runner.RunWith
 /** Exercises the production NavHost without adding a Compose test dependency. */
 @RunWith(AndroidJUnit4::class)
 class PredictiveBackTest {
+
+    @Test
+    fun rootWithoutArgumentsStaysInMirroredStack() = withNavigation { scenario, navigator ->
+        scenario.onActivity {
+            val root = navigator.navController.getBackStackEntry(RouteCodec.ROUTE_FORUM_LIST)
+            assertNull(root.arguments)
+            assertEquals(Route.ForumList, RouteCodec.decode(root))
+            assertEquals(listOf(Route.ForumList), navigator.stack.value)
+            assertEquals(1, navigator.size)
+        }
+        scenario.onActivity { navigator.push(Route.PersonalCenter) }
+        awaitDestination(scenario, navigator, Route.PersonalCenter)
+        scenario.onActivity { navigator.push(Route.Settings) }
+        awaitDestination(scenario, navigator, Route.Settings)
+        scenario.onActivity {
+            assertEquals(
+                listOf(Route.ForumList, Route.PersonalCenter, Route.Settings),
+                navigator.stack.value,
+            )
+            navigator.popToRoot()
+        }
+        awaitDestination(scenario, navigator, Route.ForumList)
+        scenario.onActivity {
+            assertEquals(listOf(Route.ForumList), navigator.stack.value)
+            assertEquals(1, navigator.size)
+            assertEquals(Navigator.Op.POP, navigator.lastOp)
+        }
+    }
 
     @Test
     fun cancelledGesturePreviewsPreviousScreenWithoutPopping() = withNavigation { scenario, navigator ->
