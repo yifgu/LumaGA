@@ -98,7 +98,7 @@ object RouteCodec {
 
     /** Decodes the route carried by a back-stack entry; null when unparseable. */
     fun decode(entry: NavBackStackEntry): Route? {
-        val args = entry.arguments ?: return null
+        val args = entry.arguments
         return when (entry.destination.route) {
             ROUTE_FORUM_LIST -> Route.ForumList
             ROUTE_TOPIC_LIST -> decodePayload(args) { decodeTopicList(it) }
@@ -144,10 +144,10 @@ object RouteCodec {
     // -- decoding helpers -----------------------------------------------------
 
     private inline fun decodePayload(
-        args: Bundle,
+        args: Bundle?,
         decode: (JSONObject) -> Route,
     ): Route? {
-        val payload = args.getString("payload") ?: return null
+        val payload = args?.getString("payload") ?: return null
         return runCatching { decode(JSONObject(payload)) }.getOrNull()
     }
 
