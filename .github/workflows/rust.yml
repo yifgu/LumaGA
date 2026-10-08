@@ -33,7 +33,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The Rust protobuf bindings are generated at build time and protoc-rust
       # shells out to protoc. Pinned to 35.1 (not 35.x latest) so the Kotlin
@@ -101,7 +101,7 @@ jobs:
       # truth for the APK. Builds are not reproducible byte-for-byte, so they
       # are not compared against these.
       - name: Upload libraries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jniLibs
           path: logic/src/main/jniLibs/*/liblogic.so
