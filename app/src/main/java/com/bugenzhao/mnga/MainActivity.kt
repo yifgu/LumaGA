@@ -82,8 +82,8 @@ class MainActivity : ComponentActivity() {
                 var observedStates = 0
                 var maxProgress = 0f
                 BackDiagnostics.log("observer started callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}")
-                // StateFlow can conflate events, and ordinary back can synthesize a
-                // start. These are observed transitions, not raw platform callbacks.
+                // StateFlow can conflate events. These are observed transitions,
+                // not a lossless trace of raw platform callbacks.
                 try {
                     navigationEventDispatcher.transitionState.collect { state ->
                         when (state) {
