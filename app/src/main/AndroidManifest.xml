@@ -35,11 +35,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".BackGestureDiagnosticsActivity"
-            android:exported="false"
-            android:enableOnBackInvokedCallback="true" />
-
         <!-- Launcher entries: two aliases so the home-screen icon can be
              switched at runtime (Settings -> Use NGA Classic Icon) by
              enabling/disabling one alias; only one may be enabled. -->

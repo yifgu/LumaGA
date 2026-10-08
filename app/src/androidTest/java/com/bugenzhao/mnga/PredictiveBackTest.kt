@@ -1,11 +1,7 @@
 package com.bugenzhao.mnga
 
-import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
-import android.widget.Button
-import android.widget.TextView
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.SideEffect
@@ -13,9 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ActivityScenario
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.storage.ThemeColor
 import com.bugenzhao.mnga.ui.nav.Navigator
@@ -23,14 +17,11 @@ import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.nav.RouteCodec
 import com.bugenzhao.mnga.ui.root.NavigationHost
 import com.bugenzhao.mnga.ui.theme.LumaGATheme
-import com.bugenzhao.mnga.util.BackDiagnostics
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -70,8 +61,6 @@ class PredictiveBackTest {
     fun cancelledGesturePreviewsPreviousScreenWithoutPopping() = withNavigation { scenario, navigator ->
         scenario.onActivity { navigator.push(Route.About) }
         awaitDestination(scenario, navigator, Route.About)
-        val marker = "cancelled-back-test-${System.nanoTime()}"
-        BackDiagnostics.log(marker)
 
         scenario.onActivity {
             it.onBackPressedDispatcher.dispatchOnBackStarted(backEvent(0f))
@@ -92,10 +81,6 @@ class PredictiveBackTest {
             assertEquals(listOf(Route.ForumList, Route.About), navigator.stack.value)
             assertEquals(Navigator.Op.PUSH, navigator.lastOp)
         }
-        val logs = runBlocking { BackDiagnostics.snapshot() }.substringAfter("$marker\n")
-        assertTrue(logs.contains("progress=0.05"))
-        assertTrue(logs.contains("transition idle wasActive=true"))
-        assertTrue(logs.contains("maxProgress=0.05"))
     }
 
     @Test
@@ -120,73 +105,6 @@ class PredictiveBackTest {
             assertEquals(Navigator.Op.POP, navigator.lastOp)
             assertFalse(it.isFinishing)
         }
-    }
-
-    @Test
-    fun isolatedProbeLeavesNavHostStackIntactAfterClosing() {
-        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-        withNavigation { scenario, navigator ->
-            scenario.onActivity { navigator.push(Route.About) }
-            awaitDestination(scenario, navigator, Route.About)
-            val marker = "isolated-probe-test-${System.nanoTime()}"
-            BackDiagnostics.log(marker)
-            val instrumentation = InstrumentationRegistry.getInstrumentation()
-            val monitor = instrumentation.addMonitor(
-                BackGestureDiagnosticsActivity::class.java.name, null, false,
-            )
-            try {
-                // A second ActivityScenario.launch() would clear MainActivity's task.
-                scenario.onActivity {
-                    it.startActivity(Intent(it, BackGestureDiagnosticsActivity::class.java))
-                }
-                val probe = monitor.waitForActivityWithTimeout(10_000) as? BackGestureDiagnosticsActivity
-                    ?: throw AssertionError("The raw back probe did not open")
-                try {
-                    instrumentation.waitForIdleSync()
-                    instrumentation.runOnMainSync {
-                        assertEquals(
-                            probe.getString(R.string.back_probe_ready),
-                            probe.findViewById<TextView>(R.id.back_probe_status).text.toString(),
-                        )
-                        assertFalse(probe.isFinishing)
-                        probe.findViewById<Button>(R.id.back_probe_close).performClick()
-                    }
-                } finally {
-                    instrumentation.runOnMainSync { probe.finish() }
-                }
-            } finally {
-                instrumentation.removeMonitor(monitor)
-            }
-            awaitDestination(scenario, navigator, Route.About)
-            await(scenario) { it.onBackPressedDispatcher.hasEnabledCallbacks() }
-            scenario.onActivity {
-                assertEquals(listOf(Route.ForumList, Route.About), navigator.stack.value)
-                assertFalse(it.isFinishing)
-            }
-            val logs = runBlocking { BackDiagnostics.snapshot() }.substringAfter("$marker\n")
-            val rawLines = logs.lines().filter { it.contains("raw-probe ") }
-            assertEquals(1, rawLines.count { it.contains("callback registered") })
-            assertEquals(1, rawLines.count { it.contains("callback stopped") })
-        }
-    }
-
-    @Test
-    fun isolatedProbeRegistersCallbackOnlyWhileStarted() {
-        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-        val marker = "probe-lifecycle-test-${System.nanoTime()}"
-        BackDiagnostics.log(marker)
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        ActivityScenario.launch<BackGestureDiagnosticsActivity>(
-            Intent(context, BackGestureDiagnosticsActivity::class.java),
-        ).use { probe ->
-            probe.moveToState(Lifecycle.State.CREATED)
-            probe.moveToState(Lifecycle.State.RESUMED)
-            probe.onActivity { assertFalse(it.isFinishing) }
-        }
-        val logs = runBlocking { BackDiagnostics.snapshot() }.substringAfter("$marker\n")
-        val rawLines = logs.lines().filter { it.contains("raw-probe ") }
-        assertEquals(2, rawLines.count { it.contains("callback registered") })
-        assertEquals(2, rawLines.count { it.contains("callback stopped") })
     }
 
     @Test
