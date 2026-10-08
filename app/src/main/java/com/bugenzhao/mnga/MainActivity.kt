@@ -4,6 +4,8 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -68,39 +70,56 @@ class MainActivity : ComponentActivity() {
         BackDiagnostics.log(
             "environment app=${BuildConfig.VERSION_NAME} sdk=${Build.VERSION.SDK_INT} " +
                 "targetSdk=${applicationInfo.targetSdkVersion} " +
-                "device=${Build.MANUFACTURER}/${Build.MODEL}",
+                "device=${Build.MANUFACTURER}/${Build.MODEL} " +
+                "animatorScale=${Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)} " +
+                "transitionScale=${Settings.Global.getFloat(contentResolver, Settings.Global.TRANSITION_ANIMATION_SCALE, 1f)}",
         )
         // Observe AndroidX's shared gesture state, never register a competing back callback.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 var active = false
-                var lastBucket = -1
+                var startedAt = 0L
+                var observedStates = 0
+                var maxProgress = 0f
                 BackDiagnostics.log("observer started callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}")
-                navigationEventDispatcher.transitionState.collect { state ->
-                    when (state) {
-                        is NavigationEventTransitionState.InProgress -> {
-                            val event = state.latestEvent
-                            val bucket = (event.progress * 10).toInt()
-                            if (!active || bucket != lastBucket) {
+                // StateFlow can conflate events, and ordinary back can synthesize a
+                // start. These are observed transitions, not raw platform callbacks.
+                try {
+                    navigationEventDispatcher.transitionState.collect { state ->
+                        when (state) {
+                            is NavigationEventTransitionState.InProgress -> {
+                                val event = state.latestEvent
+                                if (!active) {
+                                    startedAt = SystemClock.uptimeMillis()
+                                    observedStates = 0
+                                    maxProgress = 0f
+                                }
+                                observedStates++
+                                maxProgress = maxOf(maxProgress, event.progress)
                                 BackDiagnostics.log(
-                                    "gesture ${if (active) "progress" else "started"} " +
+                                    "transition ${if (active) "progress" else "started"} " +
                                         "direction=${state.direction} progress=${event.progress} " +
                                         "edge=${event.swipeEdge}",
                                 )
+                                active = true
                             }
-                            active = true
-                            lastBucket = bucket
-                        }
-                        NavigationEventTransitionState.Idle -> {
-                            // Idle alone cannot distinguish completion from cancellation.
-                            BackDiagnostics.log(
-                                "gesture idle wasActive=$active " +
-                                    "callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}",
-                            )
-                            active = false
-                            lastBucket = -1
+                            NavigationEventTransitionState.Idle -> {
+                                // Idle alone cannot distinguish completion from cancellation.
+                                val elapsed = if (active) SystemClock.uptimeMillis() - startedAt else 0L
+                                BackDiagnostics.log(
+                                    "transition idle wasActive=$active " +
+                                        "observedStates=$observedStates maxProgress=$maxProgress " +
+                                        "elapsedMs=$elapsed " +
+                                        "callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}",
+                                )
+                                active = false
+                                observedStates = 0
+                                maxProgress = 0f
+                            }
                         }
                     }
+                } finally {
+                    BackDiagnostics.log("observer stopped wasActive=$active")
                 }
             }
         }
