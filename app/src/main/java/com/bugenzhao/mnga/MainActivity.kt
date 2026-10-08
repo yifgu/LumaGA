@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.os.Build
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -22,6 +21,7 @@ import com.bugenzhao.mnga.storage.PreferencesStorage
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.ui.root.LumaGARoot
 import com.bugenzhao.mnga.ui.theme.isDarkTheme
+import com.bugenzhao.mnga.util.BackDiagnostics
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -65,8 +65,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logBackDiagnostics() {
-        Log.i(
-            "LumaGABack",
+        BackDiagnostics.log(
             "environment app=${BuildConfig.VERSION_NAME} sdk=${Build.VERSION.SDK_INT} " +
                 "targetSdk=${applicationInfo.targetSdkVersion} " +
                 "device=${Build.MANUFACTURER}/${Build.MODEL}",
@@ -76,15 +75,14 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 var active = false
                 var lastBucket = -1
-                Log.i("LumaGABack", "observer started callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}")
+                BackDiagnostics.log("observer started callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}")
                 navigationEventDispatcher.transitionState.collect { state ->
                     when (state) {
                         is NavigationEventTransitionState.InProgress -> {
                             val event = state.latestEvent
                             val bucket = (event.progress * 10).toInt()
                             if (!active || bucket != lastBucket) {
-                                Log.i(
-                                    "LumaGABack",
+                                BackDiagnostics.log(
                                     "gesture ${if (active) "progress" else "started"} " +
                                         "direction=${state.direction} progress=${event.progress} " +
                                         "edge=${event.swipeEdge}",
@@ -95,8 +93,7 @@ class MainActivity : ComponentActivity() {
                         }
                         NavigationEventTransitionState.Idle -> {
                             // Idle alone cannot distinguish completion from cancellation.
-                            Log.i(
-                                "LumaGABack",
+                            BackDiagnostics.log(
                                 "gesture idle wasActive=$active " +
                                     "callbacks=${onBackPressedDispatcher.hasEnabledCallbacks()}",
                             )
