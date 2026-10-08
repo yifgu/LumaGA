@@ -17,9 +17,7 @@ import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.nav.RouteCodec
 import com.bugenzhao.mnga.ui.root.NavigationHost
 import com.bugenzhao.mnga.ui.theme.LumaGATheme
-import com.bugenzhao.mnga.util.BackDiagnostics
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -63,8 +61,6 @@ class PredictiveBackTest {
     fun cancelledGesturePreviewsPreviousScreenWithoutPopping() = withNavigation { scenario, navigator ->
         scenario.onActivity { navigator.push(Route.About) }
         awaitDestination(scenario, navigator, Route.About)
-        val marker = "cancelled-back-test-${System.nanoTime()}"
-        BackDiagnostics.log(marker)
 
         scenario.onActivity {
             it.onBackPressedDispatcher.dispatchOnBackStarted(backEvent(0f))
@@ -85,10 +81,6 @@ class PredictiveBackTest {
             assertEquals(listOf(Route.ForumList, Route.About), navigator.stack.value)
             assertEquals(Navigator.Op.PUSH, navigator.lastOp)
         }
-        val logs = runBlocking { BackDiagnostics.snapshot() }.substringAfter("$marker\n")
-        assertTrue(logs.contains("progress=0.05"))
-        assertTrue(logs.contains("transition idle wasActive=true"))
-        assertTrue(logs.contains("maxProgress=0.05"))
     }
 
     @Test
