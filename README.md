@@ -65,8 +65,15 @@ Both need `protoc`; the first also needs `cargo-ndk` and an Android NDK.
 
 ## CI
 
-- [ci.yml](.github/workflows/ci.yml) builds the debug APK on every push/PR to
-  `main` and uploads it as an artifact.
+- [ci.yml](.github/workflows/ci.yml) builds the release APK on every push,
+  PR targeting `main`, or manual run, and uploads the `app-release` artifact.
+  Push and manual builds use the repository secrets `LUMA_KEYSTORE_BASE64`,
+  `LUMA_STORE_PASSWORD`, and `LUMA_KEY_PASSWORD` (key alias `luma`) for signing;
+  PR builds remain unsigned.
+  Once the workflow is on the default branch, open **Actions → CI → Run workflow**,
+  select the branch to build (normally `main`), and click **Run workflow**.
+  After the run succeeds, download `app-release` from its summary page and
+  extract `LumaGA_<version>.apk`. Publishing a GitHub Release is a separate step.
 - [rust.yml](.github/workflows/rust.yml) rebuilds `liblogic.so` for all three
   ABIs and runs the Rust unit tests, on changes under `rust/` or on demand.
 

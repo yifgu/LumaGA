@@ -4,6 +4,7 @@ on:
   push:
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same branch/PR.
 concurrency:
@@ -38,10 +39,10 @@ jobs:
       # from rust/ is covered by rust.yml.
       #
       # Signing: the release keystore/passwords live in repo secrets (push
-      # builds only; PRs from forks have no secret access and stay unsigned,
+      # and manual builds only; PRs stay unsigned,
       # which is fine for a build-check).
-      - name: Inject release signing (push builds only)
-        if: github.event_name == 'push'
+      - name: Inject release signing (push and manual builds only)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           KEYSTORE_B64: ${{ secrets.LUMA_KEYSTORE_BASE64 }}
           STORE_PASS: ${{ secrets.LUMA_STORE_PASSWORD }}
@@ -65,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          # Push builds upload the signed APK; PR builds (no secrets) produce
+          # Push and manual builds upload the signed APK; PR builds produce
           # the unsigned one. Match either.
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
