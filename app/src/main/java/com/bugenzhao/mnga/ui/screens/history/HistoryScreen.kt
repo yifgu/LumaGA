@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.history
 
-import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -82,7 +81,6 @@ import kotlinx.coroutines.launch
 fun HistoryScreen(navigator: Navigator) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 
     // Entry-scoped ViewModel: the loaded history survives pop-backs
     // (composition is disposed, ViewModel is not) — no refetch on return.

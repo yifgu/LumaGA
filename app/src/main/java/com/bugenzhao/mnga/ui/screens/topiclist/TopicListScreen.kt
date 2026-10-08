@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.topiclist
 
-import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +108,6 @@ fun TopicListScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 
     val mock = forumId.hasFid() && forumId.fid.startsWith("mnga_")
 

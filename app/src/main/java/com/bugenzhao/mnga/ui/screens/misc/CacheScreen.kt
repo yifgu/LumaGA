@@ -1,7 +1,6 @@
 package com.bugenzhao.mnga.ui.screens.misc
 
 import android.text.format.Formatter
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -135,7 +134,6 @@ fun CacheScreen(navigator: Navigator? = null) {
         CacheType.entries.forEach { manipulateCache(it, CacheOperation.CHECK) }
     }
 
-    BackHandler(enabled = navigator != null && navigator.size > 1) { navigator?.pop() }
 
     Scaffold(
         topBar = {

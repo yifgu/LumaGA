@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.user
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,7 +123,6 @@ fun UserProfileScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        BackHandler(enabled = navigator.size > 1) { navigator.pop() }
         return
     }
 
@@ -399,7 +397,6 @@ fun UserProfileScreen(
 
     ImageViewerOverlay(viewingImage)
 
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 }
 
 @Composable

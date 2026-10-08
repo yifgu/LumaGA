@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.subforums
 
-import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -82,7 +81,6 @@ fun SubforumListScreen(navigator: Navigator, forumId: ForumId) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 
     // Entry-scoped ViewModel: the loaded subforum list survives pop-backs
     // (composition is disposed, ViewModel is not) — no refetch on return.

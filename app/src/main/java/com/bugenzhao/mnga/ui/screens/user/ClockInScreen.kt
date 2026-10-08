@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.user
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -68,7 +67,6 @@ fun ClockInScreen(navigator: Navigator? = null) {
         App.currentUser.queryClockInStats()
     }
 
-    BackHandler(enabled = navigator != null && navigator.size > 1) { navigator?.pop() }
 
     Scaffold(
         topBar = {
