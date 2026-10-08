@@ -197,6 +197,8 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
 
     val themeColor = ThemeColor.fromRaw(themeColorRaw)
     val colorScheme = ColorSchemeMode.fromRaw(colorSchemeRaw)
+    val dynamicColorsAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        colorScheme != ColorSchemeMode.CLASSIC
     val defaultOrder = TopicListOrder.fromRaw(defaultOrderRaw)
     val webApiStrategy = WebApiStrategy.fromRaw(webApiStrategyRaw)
     val resumeFrom = TopicResumeFrom.fromRaw(resumeFromRaw)
@@ -231,28 +233,15 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
                         valueLabel = colorSchemeLabel(context, colorScheme),
                         onClick = { picker = PickerKind.COLOR_SCHEME },
                     )
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        GroupedRow(
-                            title = L.str(context, "Use Dynamic Colors"),
-                            subtitle = L.str(context, "Use wallpaper colors, except in Classic mode."),
-                            trailing = {
-                                Switch(
-                                    checked = useDynamicColors,
-                                    enabled = colorScheme != ColorSchemeMode.CLASSIC,
-                                    onCheckedChange = { prefs.useDynamicColors.value = it },
-                                )
-                            },
-                        )
-                    }
-                    if (!useDynamicColors || Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                        colorScheme == ColorSchemeMode.CLASSIC
-                    ) {
-                        PickerRow(
-                            title = L.str(context, "Theme Color"),
-                            valueLabel = L.str(context, themeColor.label),
-                            onClick = { picker = PickerKind.THEME_COLOR },
-                        )
-                    }
+                    PickerRow(
+                        title = L.str(context, "Theme Color"),
+                        valueLabel = L.str(
+                            context,
+                            if (useDynamicColors && dynamicColorsAvailable) "Dynamic Colors"
+                            else themeColor.label,
+                        ),
+                        onClick = { picker = PickerKind.THEME_COLOR },
+                    )
                     SwitchRow(
                         title = L.str(context, "Lock Screen Rotation"),
                         checked = alwaysPortrait,
@@ -504,11 +493,23 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
         PickerKind.THEME_COLOR ->
             PickerDialog(
                 title = L.str(context, "Theme Color"),
-                options = ThemeColor.entries.map {
-                    PickerOption(it, L.str(context, it.label), dot = themeColorDot(it, colorScheme))
+                options = buildList<PickerOption<ThemeColor?>> {
+                    if (dynamicColorsAvailable) {
+                        add(PickerOption(null, L.str(context, "Dynamic Colors")))
+                    }
+                    ThemeColor.entries.forEach {
+                        add(PickerOption(it, L.str(context, it.label), dot = themeColorDot(it, colorScheme)))
+                    }
                 },
-                selected = themeColor,
-                onSelect = { prefs.themeColorRaw.value = it.raw },
+                selected = themeColor.takeUnless { useDynamicColors && dynamicColorsAvailable },
+                onSelect = { color ->
+                    if (color == null) {
+                        prefs.useDynamicColors.value = true
+                    } else {
+                        prefs.themeColorRaw.value = color.raw
+                        if (dynamicColorsAvailable) prefs.useDynamicColors.value = false
+                    }
+                },
                 onDismiss = { picker = null },
             )
         PickerKind.ORDER ->

@@ -157,8 +157,7 @@
     <string name="appearance">Appearance</string>
     <string name="custom_appearance">Custom Appearance</string>
     <string name="theme_color">Theme Color</string>
-    <string name="use_dynamic_colors">Use Dynamic Colors</string>
-    <string name="dynamic_colors_description">Use wallpaper colors, except in Classic mode.</string>
+    <string name="dynamic_colors">Dynamic Colors</string>
     <string name="prefer_high_refresh_rate">Prefer High Refresh Rate</string>
     <string name="hide_notification_shortcut">Hide Notification Shortcut</string>
     <string name="new_short_message">New Short Message</string>
