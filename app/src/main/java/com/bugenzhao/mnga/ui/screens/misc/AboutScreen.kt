@@ -1,7 +1,6 @@
 package com.bugenzhao.mnga.ui.screens.misc
 
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,7 +52,6 @@ fun AboutScreen(navigator: Navigator? = null) {
         App.openURL.open(Uri.parse(url), inApp = false, prefs = App.prefs)
     }
 
-    BackHandler(enabled = navigator != null && navigator.size > 1) { navigator?.pop() }
 
     Scaffold(
         topBar = {

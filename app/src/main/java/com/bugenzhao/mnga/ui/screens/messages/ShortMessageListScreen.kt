@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.messages
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -110,7 +109,6 @@ fun ShortMessageListScreen(
         }
     }
 
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 }
 
 /** One conversation row, ported from `ShortMessageRowView`. */

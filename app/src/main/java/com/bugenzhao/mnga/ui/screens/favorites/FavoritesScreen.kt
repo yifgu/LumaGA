@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.favorites
 
-import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -107,7 +106,6 @@ fun FavoritesScreen(navigator: Navigator, initialFolderId: String? = null) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 
     val favoritesVM: FavoritesViewModel = viewModel()
     val foldersModel = favoritesVM.foldersModel

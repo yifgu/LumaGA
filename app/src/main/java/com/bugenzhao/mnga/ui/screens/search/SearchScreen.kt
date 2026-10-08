@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.search
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -147,7 +146,6 @@ fun SearchScreen(
 
     val pagerState = rememberPagerState(pageCount = { SearchTab.entries.size })
 
-    BackHandler(enabled = navigator.size > 1) { navigator.pop() }
 
     // 首次进入自动弹键盘：该页面就是用来输入的。返回（组合恢复）时不再
     // 自动请求焦点，避免从详情页返回时输入法突然弹出——用户再次点击搜索

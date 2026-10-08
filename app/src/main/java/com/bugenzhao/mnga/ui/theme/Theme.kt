@@ -1,12 +1,16 @@
 package com.bugenzhao.mnga.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.storage.ThemeColor
 
@@ -104,22 +108,27 @@ private fun classicScheme(accent: Color): ColorScheme =
         outlineVariant = Color(0xFFE8D8A8),
     )
 
+internal fun ColorSchemeMode.isDarkTheme(systemDark: Boolean): Boolean = when (this) {
+    ColorSchemeMode.AUTO -> systemDark
+    ColorSchemeMode.LIGHT, ColorSchemeMode.CLASSIC -> false
+    ColorSchemeMode.DARK -> true
+}
+
 @Composable
 fun LumaGATheme(
     themeColor: ThemeColor,
     colorSchemeMode: ColorSchemeMode,
+    useDynamicColors: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (colorSchemeMode) {
-        ColorSchemeMode.AUTO -> isSystemInDarkTheme()
-        ColorSchemeMode.LIGHT -> false
-        ColorSchemeMode.DARK -> true
-        ColorSchemeMode.CLASSIC -> false
-    }
+    val dark = colorSchemeMode.isDarkTheme(isSystemInDarkTheme())
+    val context = LocalContext.current
     val accent = Color(if (dark) themeColor.darkColor else themeColor.lightColor)
     MaterialTheme(
-        colorScheme = when (colorSchemeMode) {
-            ColorSchemeMode.CLASSIC -> classicScheme(accent)
+        colorScheme = when {
+            colorSchemeMode == ColorSchemeMode.CLASSIC -> classicScheme(accent)
+            useDynamicColors && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             else -> scheme(accent, dark)
         },
         typography = LumaGATypography,

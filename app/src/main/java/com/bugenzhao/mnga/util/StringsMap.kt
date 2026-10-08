@@ -160,6 +160,7 @@ object StringsMap {
         "Appearance" to "appearance",
         "Custom Appearance" to "custom_appearance",
         "Theme Color" to "theme_color",
+        "Dynamic Colors" to "dynamic_colors",
         "Prefer High Refresh Rate" to "prefer_high_refresh_rate",
         "Hide Notification Shortcut" to "hide_notification_shortcut",
         "New Short Message" to "new_short_message",

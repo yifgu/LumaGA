@@ -2,6 +2,7 @@ package com.bugenzhao.mnga.ui.screens.prefs
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -70,6 +71,7 @@ import com.bugenzhao.mnga.ui.nav.Navigator
 import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.screens.misc.CheckForUpdatesRow
 import com.bugenzhao.mnga.ui.screens.misc.UpdateFlowDialogs
+import com.bugenzhao.mnga.ui.theme.isDarkTheme
 import com.bugenzhao.mnga.util.DownloadDestination
 import com.bugenzhao.mnga.util.L
 import kotlinx.coroutines.launch
@@ -112,6 +114,7 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
 
     val colorSchemeRaw by prefs.colorSchemeRaw.flow.collectAsState()
     val themeColorRaw by prefs.themeColorRaw.flow.collectAsState()
+    val useDynamicColors by prefs.useDynamicColors.flow.collectAsState()
     val alwaysPortrait by prefs.alwaysPortraitOnPhone.flow.collectAsState()
     val useInAppSafari by prefs.useInAppSafari.flow.collectAsState()
     val alwaysShareImageAsFile by prefs.alwaysShareImageAsFile.flow.collectAsState()
@@ -194,6 +197,8 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
 
     val themeColor = ThemeColor.fromRaw(themeColorRaw)
     val colorScheme = ColorSchemeMode.fromRaw(colorSchemeRaw)
+    val dynamicColorsAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        colorScheme != ColorSchemeMode.CLASSIC
     val defaultOrder = TopicListOrder.fromRaw(defaultOrderRaw)
     val webApiStrategy = WebApiStrategy.fromRaw(webApiStrategyRaw)
     val resumeFrom = TopicResumeFrom.fromRaw(resumeFromRaw)
@@ -230,7 +235,11 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
                     )
                     PickerRow(
                         title = L.str(context, "Theme Color"),
-                        valueLabel = L.str(context, themeColor.label),
+                        valueLabel = L.str(
+                            context,
+                            if (useDynamicColors && dynamicColorsAvailable) "Dynamic Colors"
+                            else themeColor.label,
+                        ),
                         onClick = { picker = PickerKind.THEME_COLOR },
                     )
                     SwitchRow(
@@ -484,11 +493,24 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
         PickerKind.THEME_COLOR ->
             PickerDialog(
                 title = L.str(context, "Theme Color"),
-                options = ThemeColor.entries.map {
-                    PickerOption(it, L.str(context, it.label), dot = themeColorDot(it))
+                options = buildList<PickerOption<ThemeColor?>> {
+                    if (dynamicColorsAvailable) {
+                        add(PickerOption(null, L.str(context, "Dynamic Colors")))
+                    }
+                    ThemeColor.entries.forEach {
+                        add(PickerOption(it, L.str(context, it.label), dot = themeColorDot(it, colorScheme)))
+                    }
                 },
-                selected = themeColor,
-                onSelect = { prefs.themeColorRaw.value = it.raw },
+                selected = themeColor.takeUnless { useDynamicColors && dynamicColorsAvailable },
+                onSelect = { color ->
+                    if (color == null) {
+                        // Retain the fixed accent for Classic and older Android.
+                        prefs.useDynamicColors.value = true
+                    } else {
+                        prefs.themeColorRaw.value = color.raw
+                        if (dynamicColorsAvailable) prefs.useDynamicColors.value = false
+                    }
+                },
                 onDismiss = { picker = null },
             )
         PickerKind.ORDER ->
@@ -773,8 +795,8 @@ private fun deviceLabel(context: android.content.Context, device: Device): Strin
     }
 
 @Composable
-private fun themeColorDot(color: ThemeColor): Color {
-    val dark = isSystemInDarkTheme()
+private fun themeColorDot(color: ThemeColor, colorScheme: ColorSchemeMode): Color {
+    val dark = colorScheme.isDarkTheme(isSystemInDarkTheme())
     return Color(if (dark) color.darkColor else color.lightColor)
 }
 

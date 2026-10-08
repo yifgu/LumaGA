@@ -1,6 +1,5 @@
 package com.bugenzhao.mnga.ui.screens.misc
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -86,7 +85,6 @@ fun BlockWordsScreen(navigator: Navigator? = null) {
         if (newWord != null) focusRequester.requestFocus()
     }
 
-    BackHandler(enabled = navigator != null && navigator.size > 1) { navigator?.pop() }
 
     Scaffold(
         topBar = {

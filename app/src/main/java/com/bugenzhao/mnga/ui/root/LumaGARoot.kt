@@ -1,5 +1,6 @@
 package com.bugenzhao.mnga.ui.root
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -59,10 +60,12 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
     val prefs = App.prefs
     val themeColor by prefs.themeColorRaw.flow.collectAsState()
     val colorScheme by prefs.colorSchemeRaw.flow.collectAsState()
+    val useDynamicColors by prefs.useDynamicColors.flow.collectAsState()
 
     LumaGATheme(
         themeColor = com.bugenzhao.mnga.storage.ThemeColor.fromRaw(themeColor),
         colorSchemeMode = com.bugenzhao.mnga.storage.ColorSchemeMode.fromRaw(colorScheme),
+        useDynamicColors = useDynamicColors,
     ) {
         val navController = rememberNavController()
         val navigator = remember { Navigator(navController, listOf(Route.ForumList)) }
@@ -111,15 +114,16 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
 }
 
 @Composable
-private fun NavigationHost(
+internal fun NavigationHost(
     navigator: Navigator,
     editor: com.bugenzhao.mnga.ui.editor.EditorController?,
 ) {
-    // 首页（导航栈只有根）双击返回退出：3 秒内按两次退出，第一次提示。
-    // sheet/弹窗打开时它们自己的返回处理优先（后注册的 BackHandler 先触发）。
+    // Android 13+ must leave root back to the system for the back-to-home
+    // preview. Keep double-back-to-exit only on older Android versions.
+    val stack by navigator.stack.collectAsState()
     val context = LocalContext.current
     var backPressedAt by remember { mutableLongStateOf(0L) }
-    BackHandler(enabled = navigator.size <= 1) {
+    BackHandler(enabled = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && stack.size <= 1) {
         val now = android.os.SystemClock.uptimeMillis()
         if (now - backPressedAt < 3000) {
             (context as? android.app.Activity)?.finish()
@@ -150,6 +154,8 @@ private fun NavigationHost(
         }
     }
 
+    // NavHost owns predictive progress/cancellation; destinations must not
+    // intercept system back just to call navigator.pop().
     NavHost(
         navController = navigator.navController,
         startDestination = RouteCodec.ROUTE_FORUM_LIST,

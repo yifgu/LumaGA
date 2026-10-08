@@ -22,6 +22,15 @@ Home | Topic list | Topic detail | Topic detail
   - `app-release.apk` — signed release build (recommended)
   - `app-debug.apk` — debug build (built by CI on every push)
 - Install and sign in with your NGA account on first launch.
+- On Android 12+, choose **Settings → Theme Color → Dynamic Colors** for
+  wallpaper-based colors, or select a fixed accent in the same picker.
+  Light/dark overrides also control system-bar icons. Classic mode keeps its
+  saved fixed accent and original palette.
+- Predictive back is enabled on Android 13+. On Android 14+, screen transitions
+  follow the gesture and return to the current screen if cancelled. Back from the home
+  screen is handled by Android (including the back-to-home preview); Android
+  12 and older retain double-back-to-exit. On Android 13–14, enable predictive
+  back animations in Developer options to see the system preview.
 - `mnga://` deep links are supported, e.g. `mnga://forum/f/722` opens a forum
   directly; links copied to the clipboard are also detected and opened
   automatically when the app comes to the foreground.
