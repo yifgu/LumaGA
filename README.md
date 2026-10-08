@@ -31,6 +31,19 @@ Home | Topic list | Topic detail | Topic detail
   screen is handled by Android (including the back-to-home preview); Android
   12 and older retain double-back-to-exit. On Android 13–14, enable predictive
   back animations in Developer options to see the system preview.
+- To diagnose a missing predictive preview on Android 14+, open **About → Back
+  gesture diagnostics**. This isolated window logs raw platform start/progress/
+  cancel/invoke callbacks, bypassing AndroidX navigation. Try a slow cancelled
+  swipe and a completed swipe; both intentionally keep the probe open. Use
+  **Close and return to About → Save back debug logs** to export the shared log
+  without ADB. `raw-probe` lines include per-gesture callback counts and maximum
+  progress, but no touch coordinates or route payloads. Zero raw progress points
+  toward platform gesture delivery; nonzero raw progress with a stationary normal
+  screen points toward the normal navigation path. The probe uses a separate
+  window and does not directly trace NavHost callbacks.
+  To check app-side progress/cancellation independently of physical gestures,
+  connect an Android device and run
+  `./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.bugenzhao.mnga.PredictiveBackTest`.
 - `mnga://` deep links are supported, e.g. `mnga://forum/f/722` opens a forum
   directly; links copied to the clipboard are also detected and opened
   automatically when the app comes to the foreground.

@@ -1,7 +1,11 @@
 package com.bugenzhao.mnga
 
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
+import android.widget.Button
+import android.widget.TextView
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.SideEffect
@@ -9,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.Lifecycle
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.storage.ThemeColor
@@ -24,6 +29,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -112,6 +118,44 @@ class PredictiveBackTest {
             assertEquals(listOf(Route.ForumList, Route.About), navigator.stack.value)
             assertEquals(Navigator.Op.POP, navigator.lastOp)
             assertFalse(it.isFinishing)
+        }
+    }
+
+    @Test
+    fun isolatedProbeLeavesNavHostStackIntactAfterStoppingAndClosing() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        withNavigation { scenario, navigator ->
+            scenario.onActivity { navigator.push(Route.About) }
+            awaitDestination(scenario, navigator, Route.About)
+            val marker = "isolated-probe-test-${System.nanoTime()}"
+            BackDiagnostics.log(marker)
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            ActivityScenario.launch<BackGestureDiagnosticsActivity>(
+                Intent(context, BackGestureDiagnosticsActivity::class.java),
+            ).use { probe ->
+                probe.onActivity {
+                    assertEquals(
+                        it.getString(R.string.back_probe_ready),
+                        it.findViewById<TextView>(R.id.back_probe_status).text.toString(),
+                    )
+                }
+                probe.moveToState(Lifecycle.State.CREATED)
+                probe.moveToState(Lifecycle.State.RESUMED)
+                probe.onActivity {
+                    assertFalse(it.isFinishing)
+                    it.findViewById<Button>(R.id.back_probe_close).performClick()
+                }
+            }
+            awaitDestination(scenario, navigator, Route.About)
+            await(scenario) { it.onBackPressedDispatcher.hasEnabledCallbacks() }
+            scenario.onActivity {
+                assertEquals(listOf(Route.ForumList, Route.About), navigator.stack.value)
+                assertFalse(it.isFinishing)
+            }
+            val logs = runBlocking { BackDiagnostics.snapshot() }.substringAfter("$marker\n")
+            val rawLines = logs.lines().filter { it.contains("raw-probe ") }
+            assertEquals(2, rawLines.count { it.contains("callback registered") })
+            assertEquals(2, rawLines.count { it.contains("callback stopped") })
         }
     }
 

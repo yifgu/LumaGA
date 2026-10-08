@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="back_probe_title">返回手势诊断 / Back gesture diagnostics</string>
+    <string name="back_probe_subtitle">独立窗口中的原始系统回调 / Raw platform callbacks in a separate window</string>
+    <string name="back_probe_instructions">缓慢从屏幕边缘滑入并停留，再滑回边缘取消；然后重复并松手完成。\n\nSlowly swipe from the screen edge, hold, then return to the edge to cancel. Repeat and release to complete.\n\n此页面直接记录系统回调，不经过 AndroidX 或 NavHost。取消和完成均停留在此页面；invoked 表示系统完成返回。\n\nThis page records platform callbacks without AndroidX or NavHost. Both cancellation and completion keep this page open; invoked means the system completed back.\n\n关闭后，在「关于」中选择「保存返回调试日志」。此测试不直接跟踪正常页面的 NavHost 回调。\n\nClose, then use Save back debug logs in About. This test does not trace normal NavHost callbacks.</string>
+    <string name="back_probe_progress">原始系统返回进度 / Raw platform back progress</string>
+    <string name="back_probe_ready">等待手势 / Waiting for a gesture</string>
+    <string name="back_probe_unsupported">需要 Android 14 或更新版本 / Requires Android 14 or newer</string>
+    <string name="back_probe_close">关闭并返回关于 / Close and return to About</string>
+</resources>

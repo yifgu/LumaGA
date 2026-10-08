@@ -1,6 +1,8 @@
 package com.bugenzhao.mnga.ui.screens.misc
 
+import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bugenzhao.mnga.App
+import com.bugenzhao.mnga.BackGestureDiagnosticsActivity
 import com.bugenzhao.mnga.BuildConfig
 import com.bugenzhao.mnga.R
 import com.bugenzhao.mnga.ui.components.GroupedList
@@ -134,12 +137,24 @@ fun AboutScreen(navigator: Navigator? = null) {
 
             item(key = "back-diagnostics") {
                 GroupedList {
-                    GroupedRow(
-                        onClick = { saveBackLogs.launch("predictive-back.txt") },
-                        title = "保存返回调试日志 / Save back debug logs",
-                        subtitle = "导出文本文件，无需 ADB / Export a text file without ADB",
-                        trailing = { RowChevron() },
-                    )
+                    Column {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            GroupedRow(
+                                onClick = {
+                                    context.startActivity(Intent(context, BackGestureDiagnosticsActivity::class.java))
+                                },
+                                title = context.getString(R.string.back_probe_title),
+                                subtitle = context.getString(R.string.back_probe_subtitle),
+                                trailing = { RowChevron() },
+                            )
+                        }
+                        GroupedRow(
+                            onClick = { saveBackLogs.launch("predictive-back.txt") },
+                            title = "保存返回调试日志 / Save back debug logs",
+                            subtitle = "导出文本文件，无需 ADB / Export a text file without ADB",
+                            trailing = { RowChevron() },
+                        )
+                    }
                 }
             }
 
