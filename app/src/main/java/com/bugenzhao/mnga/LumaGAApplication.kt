@@ -48,6 +48,7 @@ class LumaGAApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.bugenzhao.mnga.util.BackDiagnostics.initialize(this)
 
         // 腾讯 Bugly 崩溃监控（AppID 配置在 gradle.properties 的 buglyAppId）。
         // 覆盖 Java/Kotlin 崩溃与 Rust liblogic.so 的 native 崩溃。
