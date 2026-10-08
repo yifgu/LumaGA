@@ -9,16 +9,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.view.WindowCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.storage.ThemeColor
+import com.bugenzhao.mnga.ui.screens.prefs.PreferencesSheet
 import com.bugenzhao.mnga.ui.theme.LumaGATheme
 import com.bugenzhao.mnga.ui.theme.isDarkTheme
+import com.bugenzhao.mnga.util.L
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -86,6 +96,97 @@ class ThemeTest {
                 assertEquals(ThemeColor.RED.raw, App.prefs.themeColorRaw.value)
             }
         }
+    }
+
+    @Test
+    fun themeColorPickerOffersDynamicAndFixedColorsTogether() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        withThemeColorPicker(ColorSchemeMode.LIGHT) { scenario, device ->
+            selectThemeColor(device, "Dynamic Colors")
+            await(scenario) { App.prefs.useDynamicColors.value }
+            scenario.onActivity {
+                assertEquals(ThemeColor.RED.raw, App.prefs.themeColorRaw.value)
+            }
+            clickLabel(device, "Theme Color")
+            selectThemeColor(device, "LumaGA")
+            await(scenario) {
+                !App.prefs.useDynamicColors.value &&
+                    App.prefs.themeColorRaw.value == ThemeColor.LUMAGA.raw
+            }
+        }
+    }
+
+    @Test
+    fun classicPickerKeepsDynamicPreferenceDormant() {
+        withThemeColorPicker(ColorSchemeMode.CLASSIC) { scenario, device ->
+            scenario.onActivity { App.prefs.useDynamicColors.value = true }
+            assertFalse(device.hasObject(By.text(localized("Dynamic Colors"))))
+            selectThemeColor(device, "LumaGA")
+            await(scenario) { App.prefs.themeColorRaw.value == ThemeColor.LUMAGA.raw }
+            scenario.onActivity {
+                assertTrue(App.prefs.useDynamicColors.value)
+                App.prefs.colorSchemeRaw.value = ColorSchemeMode.LIGHT.raw
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                assertTrue(device.wait(Until.hasObject(By.text(localized("Dynamic Colors"))), 5_000))
+            }
+        }
+    }
+
+    @Test
+    fun olderAndroidPickerOnlyOffersFixedColors() {
+        assumeTrue(Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+        withThemeColorPicker(ColorSchemeMode.LIGHT) { scenario, device ->
+            scenario.onActivity { App.prefs.useDynamicColors.value = true }
+            assertFalse(device.hasObject(By.text(localized("Dynamic Colors"))))
+            selectThemeColor(device, "LumaGA")
+            await(scenario) { App.prefs.themeColorRaw.value == ThemeColor.LUMAGA.raw }
+            scenario.onActivity { assertTrue(App.prefs.useDynamicColors.value) }
+        }
+    }
+
+    private fun withThemeColorPicker(
+        mode: ColorSchemeMode,
+        block: (ActivityScenario<MainActivity>, UiDevice) -> Unit,
+    ) = withSavedPreferences {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                App.prefs.colorSchemeRaw.value = mode.raw
+                App.prefs.themeColorRaw.value = ThemeColor.RED.raw
+                App.prefs.useDynamicColors.value = false
+                activity.setContent {
+                    val scheme by App.prefs.colorSchemeRaw.flow.collectAsState()
+                    val color by App.prefs.themeColorRaw.flow.collectAsState()
+                    val dynamic by App.prefs.useDynamicColors.flow.collectAsState()
+                    LumaGATheme(
+                        themeColor = ThemeColor.fromRaw(color),
+                        colorSchemeMode = ColorSchemeMode.fromRaw(scheme),
+                        useDynamicColors = dynamic,
+                    ) {
+                        PreferencesSheet(onDismiss = {})
+                    }
+                }
+            }
+            val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+            clickLabel(device, "Theme Color")
+            // Wait for the actual picker, not just the Theme Color row.
+            assertTrue(device.wait(Until.hasObject(By.text(localized("Cancel"))), 5_000))
+            block(scenario, device)
+        }
+    }
+
+    private fun localized(key: String) =
+        L.str(InstrumentationRegistry.getInstrumentation().targetContext, key)
+
+    private fun clickLabel(device: UiDevice, key: String) {
+        val item = device.wait(Until.findObject(By.text(localized(key))), 5_000)
+            ?: throw AssertionError("Missing theme picker label: $key")
+        item.click()
+    }
+
+    private fun selectThemeColor(device: UiDevice, key: String) {
+        clickLabel(device, key)
+        assertTrue(device.wait(Until.gone(By.text(localized("Cancel"))), 5_000))
     }
 
     private fun renderTheme(

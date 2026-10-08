@@ -504,6 +504,7 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
                 selected = themeColor.takeUnless { useDynamicColors && dynamicColorsAvailable },
                 onSelect = { color ->
                     if (color == null) {
+                        // Retain the fixed accent for Classic and older Android.
                         prefs.useDynamicColors.value = true
                     } else {
                         prefs.themeColorRaw.value = color.raw

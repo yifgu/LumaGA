@@ -22,9 +22,10 @@ Home | Topic list | Topic detail | Topic detail
   - `app-release.apk` — signed release build (recommended)
   - `app-debug.apk` — debug build (built by CI on every push)
 - Install and sign in with your NGA account on first launch.
-- On Android 12+, enable **Settings → Use Dynamic Colors** for wallpaper-based
-  colors. Light/dark overrides also control system-bar icons. Classic mode keeps
-  its original palette; disabling dynamic colors restores your saved accent.
+- On Android 12+, choose **Settings → Theme Color → Dynamic Colors** for
+  wallpaper-based colors, or select a fixed accent in the same picker.
+  Light/dark overrides also control system-bar icons. Classic mode keeps its
+  saved fixed accent and original palette.
 - Predictive back is enabled on Android 13+. On Android 14+, screen transitions
   follow the gesture and return to the current screen if cancelled. Back from the home
   screen is handled by Android (including the back-to-home preview); Android
