@@ -1,5 +1,6 @@
 package com.bugenzhao.mnga.ui.nav
 
+import android.util.Log
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,25 +38,30 @@ class Navigator(
         private set
 
     fun push(route: Route) {
+        Log.i("LumaGABack", "programmatic push")
         lastOp = Op.PUSH
         navController.navigate(RouteCodec.encode(route))
     }
 
     fun pop() {
+        Log.i("LumaGABack", "programmatic pop")
         lastOp = Op.POP
         navController.popBackStack()
     }
 
     fun popToRoot() {
+        Log.i("LumaGABack", "programmatic popToRoot")
         navController.popBackStack(RouteCodec.ROUTE_FORUM_LIST, inclusive = false)
     }
 
     fun popTo(index: Int) {
+        Log.i("LumaGABack", "programmatic popTo index=$index")
         val entry = navController.currentBackStack.value.getOrNull(index) ?: return
         navController.popBackStack(entry, inclusive = false)
     }
 
     fun replace(route: Route) {
+        Log.i("LumaGABack", "programmatic replace")
         navController.navigate(RouteCodec.encode(route)) {
             popUpTo(navController.graph.id) { inclusive = true }
         }
@@ -79,6 +85,20 @@ class Navigator(
                     else -> lastOp
                 }
                 _stack.value = routes
+                // Destination patterns contain placeholders, not IDs or user-supplied payloads.
+                Log.i(
+                    "LumaGABack",
+                    "stack size=${routes.size} op=$lastOp " +
+                        "destinations=${entries.map { it.destination.route }}",
+                )
+            }
+        }
+        scope.launch {
+            navController.visibleEntries.collect { entries ->
+                Log.i(
+                    "LumaGABack",
+                    "visible=${entries.map { "${it.destination.route}:${it.lifecycle.currentState}" }}",
+                )
             }
         }
     }
