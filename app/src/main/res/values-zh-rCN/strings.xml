@@ -157,6 +157,8 @@
     <string name="appearance">外观</string>
     <string name="custom_appearance">自定义外观</string>
     <string name="theme_color">主题色</string>
+    <string name="use_dynamic_colors">使用动态配色</string>
+    <string name="dynamic_colors_description">使用壁纸配色，经典模式除外。</string>
     <string name="prefer_high_refresh_rate">高刷新率优先</string>
     <string name="hide_notification_shortcut">隐藏通知快捷入口</string>
     <string name="new_short_message">发表短消息</string>

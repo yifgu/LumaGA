@@ -2,6 +2,7 @@ package com.bugenzhao.mnga.ui.screens.prefs
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -70,6 +71,7 @@ import com.bugenzhao.mnga.ui.nav.Navigator
 import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.screens.misc.CheckForUpdatesRow
 import com.bugenzhao.mnga.ui.screens.misc.UpdateFlowDialogs
+import com.bugenzhao.mnga.ui.theme.isDarkTheme
 import com.bugenzhao.mnga.util.DownloadDestination
 import com.bugenzhao.mnga.util.L
 import kotlinx.coroutines.launch
@@ -112,6 +114,7 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
 
     val colorSchemeRaw by prefs.colorSchemeRaw.flow.collectAsState()
     val themeColorRaw by prefs.themeColorRaw.flow.collectAsState()
+    val useDynamicColors by prefs.useDynamicColors.flow.collectAsState()
     val alwaysPortrait by prefs.alwaysPortraitOnPhone.flow.collectAsState()
     val useInAppSafari by prefs.useInAppSafari.flow.collectAsState()
     val alwaysShareImageAsFile by prefs.alwaysShareImageAsFile.flow.collectAsState()
@@ -228,11 +231,28 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
                         valueLabel = colorSchemeLabel(context, colorScheme),
                         onClick = { picker = PickerKind.COLOR_SCHEME },
                     )
-                    PickerRow(
-                        title = L.str(context, "Theme Color"),
-                        valueLabel = L.str(context, themeColor.label),
-                        onClick = { picker = PickerKind.THEME_COLOR },
-                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        GroupedRow(
+                            title = L.str(context, "Use Dynamic Colors"),
+                            subtitle = L.str(context, "Use wallpaper colors, except in Classic mode."),
+                            trailing = {
+                                Switch(
+                                    checked = useDynamicColors,
+                                    enabled = colorScheme != ColorSchemeMode.CLASSIC,
+                                    onCheckedChange = { prefs.useDynamicColors.value = it },
+                                )
+                            },
+                        )
+                    }
+                    if (!useDynamicColors || Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                        colorScheme == ColorSchemeMode.CLASSIC
+                    ) {
+                        PickerRow(
+                            title = L.str(context, "Theme Color"),
+                            valueLabel = L.str(context, themeColor.label),
+                            onClick = { picker = PickerKind.THEME_COLOR },
+                        )
+                    }
                     SwitchRow(
                         title = L.str(context, "Lock Screen Rotation"),
                         checked = alwaysPortrait,
@@ -485,7 +505,7 @@ fun PreferencesSheet(onDismiss: () -> Unit, navigator: Navigator? = null) {
             PickerDialog(
                 title = L.str(context, "Theme Color"),
                 options = ThemeColor.entries.map {
-                    PickerOption(it, L.str(context, it.label), dot = themeColorDot(it))
+                    PickerOption(it, L.str(context, it.label), dot = themeColorDot(it, colorScheme))
                 },
                 selected = themeColor,
                 onSelect = { prefs.themeColorRaw.value = it.raw },
@@ -773,8 +793,8 @@ private fun deviceLabel(context: android.content.Context, device: Device): Strin
     }
 
 @Composable
-private fun themeColorDot(color: ThemeColor): Color {
-    val dark = isSystemInDarkTheme()
+private fun themeColorDot(color: ThemeColor, colorScheme: ColorSchemeMode): Color {
+    val dark = colorScheme.isDarkTheme(isSystemInDarkTheme())
     return Color(if (dark) color.darkColor else color.lightColor)
 }
 

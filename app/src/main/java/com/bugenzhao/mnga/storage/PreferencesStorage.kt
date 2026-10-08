@@ -168,6 +168,7 @@ class PreferencesStorage(private val prefs: SharedPreferences) {
     val defaultTopicListOrderRaw = intPref("defaultTopicListOrder", 0)
     val themeColorRaw = intPref("themeColorNew", 0)
     val colorSchemeRaw = intPref("colorScheme", 0)
+    val useDynamicColors = boolPref("useDynamicColors", false)
     val postRowDateTimeStrategyRaw = intPref("postRowDateTimeStrategy", 0)
     val topicDetailsWebApiStrategyRaw = intPref("topicDetailsWebApiStrategyNew", 1)
 

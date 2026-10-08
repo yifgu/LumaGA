@@ -60,10 +60,12 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
     val prefs = App.prefs
     val themeColor by prefs.themeColorRaw.flow.collectAsState()
     val colorScheme by prefs.colorSchemeRaw.flow.collectAsState()
+    val useDynamicColors by prefs.useDynamicColors.flow.collectAsState()
 
     LumaGATheme(
         themeColor = com.bugenzhao.mnga.storage.ThemeColor.fromRaw(themeColor),
         colorSchemeMode = com.bugenzhao.mnga.storage.ColorSchemeMode.fromRaw(colorScheme),
+        useDynamicColors = useDynamicColors,
     ) {
         val navController = rememberNavController()
         val navigator = remember { Navigator(navController, listOf(Route.ForumList)) }
