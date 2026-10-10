@@ -741,37 +741,19 @@ fn check_topic_favor_result(result: ServiceResult<Value>) -> ServiceResult<()> {
 }
 
 pub async fn topic_favor(request: TopicFavorRequest) -> ServiceResult<TopicFavorResponse> {
-    // 注意：del 的 tid 参数比较特殊，需要同时发送两种形态做兼容：
-    // - `del=<tid>`：官方语义（tid 逗号串，可批量），见
-    //   lnga_harmony/docs/FAVORITE_DESIGN.md §2.7；
-    // - `tidarray[]=<tid>`：网页版通道 PHP 按数组解析 tidarray
-    //   （`foreach ($_POST['tidarray'] as $tid)`），标量 `tidarray=x`
-    //   会被 foreach 静默跳过——返回"操作成功"但实际没删，
-    //   表现为取消收藏后退出重进又回来。
-    // 服务端只会读取它认识的那一个，另一个被忽略；删除是幂等的。
-    let (act, op, mut params): (&str, FavorOp, Vec<(&str, &str)>) = match request.get_operation() {
-        TopicFavorRequest_Operation::ADD => (
-            "add",
-            FavorOp::Add,
-            vec![("tid", request.get_topic_id())],
-        ),
-        TopicFavorRequest_Operation::DELETE => (
-            "del",
-            FavorOp::Remove,
-            vec![
-                ("del", request.get_topic_id()),
-                ("tidarray[]", request.get_topic_id()),
-            ],
-        ),
+    // The __output=8 web API takes a scalar, comma-separated tidarray, not
+    // tidarray[] or the signed APP API's del parameter.
+    let (act, tid_key, op) = match request.get_operation() {
+        TopicFavorRequest_Operation::ADD => ("add", "tid", FavorOp::Add),
+        TopicFavorRequest_Operation::DELETE => ("del", "tidarray", FavorOp::Remove),
     };
     let folder_id = request.get_folder_id();
-    params.push(("folder", folder_id));
 
     check_topic_favor_result(
         fetch_json_value(
             "nuke.php",
             vec![("__lib", "topic_favor_v2"), ("__act", act)],
-            params,
+            vec![(tid_key, request.get_topic_id()), ("folder", folder_id)],
         )
         .await,
     )?;
@@ -828,6 +810,86 @@ mod test {
         mutate_favor_response("", FavorOp::Remove, &mut response);
         assert!(!response.is_favored);
         assert!(response.folder_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_last_favorite_delete_success_after_leaving_and_reopening_folder() {
+        use crate::fetch::with_mock_fetch;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        for confirmation in [
+            r#"{"error":{"0":"操作成功"}}"#,
+            r#"{"data":{"0":"操作成功"}}"#,
+        ] {
+            let folders = Rc::new(RefCell::new(vec!["7", "8"]));
+            let server_folders = folders.clone();
+            with_mock_fetch(
+                move |request| {
+                    let query = request
+                        .url()
+                        .query_pairs()
+                        .collect::<std::collections::HashMap<_, _>>();
+                    let body =
+                        url::form_urlencoded::parse(request.body().unwrap().as_bytes().unwrap())
+                            .collect::<std::collections::HashMap<_, _>>();
+                    if request.url().path() == "/nuke.php" {
+                        assert_eq!(query.get("__lib").unwrap(), "topic_favor_v2");
+                        assert_eq!(query.get("__act").unwrap(), "del");
+                        assert_eq!(query.get("__output").unwrap(), "8");
+                        assert_eq!(body.get("folder").unwrap(), "7");
+                        assert_eq!(body.get("tidarray").unwrap(), "10");
+                        assert!(!body.contains_key("tidarray[]"));
+                        assert!(!body.contains_key("del"));
+                        server_folders.borrow_mut().retain(|folder| *folder != "7");
+                        Ok(confirmation.to_owned())
+                    } else {
+                        assert_eq!(request.url().path(), "/thread.php");
+                        assert_eq!(query.get("page").unwrap(), "1");
+                        let present = server_folders.borrow().contains(&query["favor"].as_ref());
+                        Ok(if present {
+                            "<root><__T><item><tid>10</tid><fid>1</fid>\
+                             <subject>Last favorite</subject><postdate>1</postdate>\
+                             <lastpost>1</lastpost><replies>0</replies></item></__T>\
+                             <__ROWS>1</__ROWS><__T__ROWS_PAGE>35</__T__ROWS_PAGE></root>"
+                        } else {
+                            "<root><__T/><__ROWS>0</__ROWS>\
+                             <__T__ROWS_PAGE>35</__T__ROWS_PAGE></root>"
+                        }
+                        .to_owned())
+                    }
+                },
+                async {
+                    let list_request = |folder: &str| FavoriteTopicListRequest {
+                        folder_id: folder.to_owned(),
+                        page: 1,
+                        ..Default::default()
+                    };
+                    let initial = get_favorite_topic_list(list_request("7")).await.unwrap();
+                    assert_eq!(initial.topics.len(), 1);
+                    // The same topic also belongs to a folder that must survive.
+                    get_favorite_topic_list(list_request("8")).await.unwrap();
+                    topic_favor(TopicFavorRequest {
+                        topic_id: "10".to_owned(),
+                        folder_id: "7".to_owned(),
+                        operation: TopicFavorRequest_Operation::DELETE,
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+
+                    // Drop the entry snapshot, as when returning to the main page.
+                    drop(initial);
+                    let reopened = get_favorite_topic_list(list_request("7")).await.unwrap();
+                    assert!(reopened.topics.is_empty());
+                    assert_eq!(reopened.pages, 0);
+                    let other = get_favorite_topic_list(list_request("8")).await.unwrap();
+                    assert_eq!(other.topics.len(), 1);
+                },
+            )
+            .await;
+            assert_eq!(*folders.borrow(), vec!["8"]);
+        }
     }
 
     #[test]
