@@ -82,7 +82,12 @@ Both need `protoc`; the first also needs `cargo-ndk` and an Android NDK.
   Once the workflow is on the default branch, open **Actions → CI → Run workflow**,
   select the branch to build (normally `main`), and click **Run workflow**.
   After the run succeeds, download `app-release` from its summary page and
-  extract `LumaGA_<version>.apk`. Publishing a GitHub Release is a separate step.
+  extract `LumaGA_<version>.apk`. To also publish a GitHub Release, enable
+  **publish_release** when starting the manual run. After unit tests and the
+  release build succeed, CI verifies the APK signature and version, then creates
+  `v<version>` at the built commit and uploads the APK with changelog release
+  notes. Leave the option disabled for build-only runs; existing releases are
+  never overwritten.
 - [rust.yml](.github/workflows/rust.yml) rebuilds `liblogic.so` for all three
   ABIs and runs the Rust unit tests, on changes under `rust/` or on demand.
 

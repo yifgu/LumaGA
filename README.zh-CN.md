@@ -105,7 +105,9 @@ rust/gen-kotlin-protos.sh   # 仅当 rust/protos/ 变更时
 - [ci.yml](.github/workflows/ci.yml)：每次 push、目标为 `main` 的 PR 或手动运行时构建 release APK，并上传 `app-release` 产物。
   push 和手动构建使用仓库 Secrets 中的 `LUMA_KEYSTORE_BASE64`、`LUMA_STORE_PASSWORD` 和 `LUMA_KEY_PASSWORD` 签名（密钥别名为 `luma`）；PR 构建不签名。
   工作流合入默认分支后，打开 **Actions → CI → Run workflow**，选择待构建分支（通常为 `main`），点击 **Run workflow**。
-  运行成功后，从详情页下载 `app-release` 并解压得到 `LumaGA_<version>.apk`。发布 GitHub Release 仍需单独操作。
+  运行成功后，从详情页下载 `app-release` 并解压得到 `LumaGA_<version>.apk`。
+  如需同时发布 GitHub Release，手动运行时启用 **publish_release**。单元测试和构建成功后，CI 校验 APK 签名和版本，在构建提交上创建 `v<version>` 并上传 APK，发布说明取自 CHANGELOG。
+  仅构建时保持该选项关闭；已有 Release 不会被覆盖。
 - [rust.yml](.github/workflows/rust.yml)：`rust/` 变更时重编译三个 ABI 的 `liblogic.so` 并运行 Rust 单元测试。
 
 ## 登录说明

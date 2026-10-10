@@ -5,6 +5,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a signed GitHub Release for the app version
+        type: boolean
+        default: false
 
 # Cancel superseded runs on the same branch/PR.
 concurrency:
@@ -15,6 +20,10 @@ jobs:
   build:
     name: Build release APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
@@ -48,6 +57,7 @@ jobs:
           STORE_PASS: ${{ secrets.LUMA_STORE_PASSWORD }}
           KEY_PASS: ${{ secrets.LUMA_KEY_PASSWORD }}
         run: |
+          test -n "$KEYSTORE_B64" && test -n "$STORE_PASS" && test -n "$KEY_PASS"
           echo "$KEYSTORE_B64" | base64 -d > app/release.keystore
           cat > app/release-keystore.properties <<EOF
           storeFile=release.keystore
@@ -62,6 +72,19 @@ jobs:
       - name: Build
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Verify signed release APK
+        id: release
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+        run: |
+          VERSION="$(jq -er '.elements[0].versionName' app/build/outputs/apk/release/output-metadata.json)"
+          VERSION_CODE="$(jq -er '.elements[0].versionCode' app/build/outputs/apk/release/output-metadata.json)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          APK="app/build/outputs/apk/release/LumaGA_${VERSION}.apk"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | grep -F "versionCode='$VERSION_CODE' versionName='$VERSION'"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Upload APK
         uses: actions/upload-artifact@v6
         with:
@@ -70,3 +93,41 @@ jobs:
           # the unsigned one. Match either.
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+  publish:
+    name: Publish signed release
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download verified APK and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RELEASE_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          TAG_REFS="$(git ls-remote --tags origin "refs/tags/v$VERSION")"
+          test -z "$TAG_REFS" || { echo "::error::Release tag already exists; refusing to publish."; exit 1; }
+          gh run download "$RUN_ID" --name app-release --dir release
+          APK="release/LumaGA_${VERSION}.apk"
+          test -f "$APK"
+          NOTES_FILE="$RUNNER_TEMP/release-notes.txt"
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { insec = 1; next }
+            insec && $0 ~ /^## \[/ { exit }
+            insec { print }
+          ' CHANGELOG.md > "$NOTES_FILE"
+          if [ -s "$NOTES_FILE" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES_FILE")
+          else
+            NOTES_ARGS=(--generate-notes)
+          fi
+          gh release create "v$VERSION" --target "$RELEASE_SHA" \
+            --title "LumaGA v$VERSION" "${NOTES_ARGS[@]}" "$APK"
