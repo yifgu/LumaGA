@@ -43,9 +43,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,10 +52,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bugenzhao.mnga.App
-import com.bugenzhao.mnga.logicCall
 import com.bugenzhao.mnga.protos.datamodel.Notification
-import com.bugenzhao.mnga.protos.service.MarkNotificationReadRequest
-import com.bugenzhao.mnga.protos.service.SyncRequest
 import com.bugenzhao.mnga.ui.nav.Navigator
 import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.screens.user.nameDisplayCompat
@@ -66,9 +60,6 @@ import com.bugenzhao.mnga.util.DateFormatters
 import com.bugenzhao.mnga.util.Haptics
 import com.bugenzhao.mnga.util.L
 import java.util.Date
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * Icon per notification type, mirroring `Notification.TypeEnum.icon`.
@@ -108,7 +99,7 @@ private fun Notification.Type.showsOtherUser(): Boolean = when (this) {
 /**
  * The notifications sheet, ported from `NotificationListView` +
  * `NotificationListNavigationView`: paged rows with swipe-to-toggle read,
- * optimistic marking and Mark All as Read.
+ * shared read state and Mark All as Read.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,41 +109,15 @@ fun NotificationListSheet(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    val scope = rememberCoroutineScope()
-
-    val dataSource = App.notis.dataSource
-    val state by dataSource.state.collectAsState()
-
-    // Optimistic read overrides applied on top of the fetched list.
-    val readOverrides = remember { mutableStateMapOf<String, Boolean>() }
-
-    fun isRead(noti: Notification): Boolean = readOverrides[noti.id] ?: noti.read
-    fun mark(ids: List<String>, read: Boolean, onSuccess: () -> Unit = {}) {
-        if (ids.isEmpty()) return
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    logicCall(
-                        SyncRequest.newBuilder()
-                            .setMarkNotiRead(
-                                MarkNotificationReadRequest.newBuilder()
-                                    .addAllIds(ids)
-                                    .setRead(read)
-                            )
-                            .build(),
-                    )
-                }
-            }
-            ids.forEach { readOverrides[it] = read }
-            onSuccess()
-        }
-    }
+    val model = App.notis
+    val dataSource = model.dataSource
+    val state by model.state.collectAsState()
 
     LaunchedEffect(Unit) {
         if (dataSource.notLoaded) dataSource.initialLoad()
     }
 
-    val unreadCount = state.items.count { isRead(it).not() }
+    val unreadCount = state.items.count { !it.read }
 
     // 页面形式（与设置页一致的 AppBar），不再是底部弹窗。
     Scaffold(
@@ -185,8 +150,8 @@ fun NotificationListSheet(
                 actions = {
                     IconButton(
                         onClick = {
-                            mark(
-                                state.items.filter { !isRead(it) }.map { it.id },
+                            model.markRead(
+                                state.items.filter { !it.read }.map { it.id },
                                 read = true,
                             ) { Haptics.play(view, Haptics.NotificationType.SUCCESS) }
                         },
@@ -227,16 +192,16 @@ fun NotificationListSheet(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         itemsIndexed(state.items, key = { _, n -> n.id }) { _, noti ->
-                            val read = isRead(noti)
+                            val read = noti.read
                             NotificationRow(
                                 noti = noti,
                                 read = read,
                                 onClick = {
-                                    mark(listOf(noti.id), read = true)
+                                    model.markRead(listOf(noti.id), read = true)
                                     // 与其它列表页一致：push 详情，返回时回到通知列表。
                                     navigator.push(routeForNotification(noti))
                                 },
-                                onToggleRead = { mark(listOf(noti.id), read = !read) },
+                                onToggleRead = { model.markRead(listOf(noti.id), read = !read) },
                             )
                         }
                     }
