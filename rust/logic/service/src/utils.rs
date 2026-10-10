@@ -337,7 +337,10 @@ mod test {
         ] {
             let xml = format!("<root><__ROWS>0</__ROWS>{page_size}<__T/></root>");
             let package = sxd_document::parser::parse(&xml).unwrap();
-            let topics = extract_nodes(&package, "/root/__T/item", |nodes| nodes).unwrap();
+            let topics = extract_nodes(&package, "/root/__T/item", |nodes| {
+                nodes.into_iter().map(|node| node.string_value()).collect()
+            })
+            .unwrap();
             assert!(topics.is_empty());
             assert_eq!(
                 extract_pages(&package, "/root/__ROWS", "/root/__T__ROWS_PAGE", 35).unwrap(),
