@@ -112,7 +112,7 @@ fun FavoritesScreen(navigator: Navigator, initialFolderId: String? = null) {
                 ?: folders.firstOrNull { it.id == initialFolderId }
                 ?: folders.firstOrNull { it.isDefault }
                 ?: folders.first()
-            if (restored.id != currentFolder?.id) {
+            if (restored != currentFolder) {
                 currentFolder = restored
                 favoritesVM.currentFolderId = restored.id
             }

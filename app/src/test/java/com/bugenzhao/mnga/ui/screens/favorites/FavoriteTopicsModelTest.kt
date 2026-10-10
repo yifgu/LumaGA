@@ -1,7 +1,9 @@
 package com.bugenzhao.mnga.ui.screens.favorites
 
+import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
 import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.AsyncRequest
+import com.bugenzhao.mnga.protos.service.FavoriteFolderListResponse
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
 import com.bugenzhao.mnga.protos.service.TopicFavorRequest
@@ -38,6 +40,13 @@ class FavoriteTopicsModelTest {
             val deletions = FavoriteTopicDeletions(
                 scope,
                 fetchTopics = fetch,
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder().addFolders(
+                            FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(1)
+                        ).build()
+                    )
+                },
                 deleteFolder = {
                     assertEquals("1", it.favoriteFolderModify.folderId)
                     assertTrue(it.favoriteFolderModify.delete)
@@ -109,6 +118,44 @@ class FavoriteTopicsModelTest {
     }
 
     @Test
+    fun `a single parsed topic does not permit deleting a folder with other or uncounted favorites`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            for (count in listOf(0, 2, 35)) {
+                var itemDeletes = 0
+                val deletions = FavoriteTopicDeletions(
+                    scope,
+                    fetchTopics = {
+                        Result.success(
+                            FavoriteTopicListResponse.newBuilder()
+                                .addTopics(Topic.newBuilder().setId("10")).setPages(1).build()
+                        )
+                    },
+                    fetchFolders = {
+                        Result.success(
+                            FavoriteFolderListResponse.newBuilder().addFolders(
+                                FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(count)
+                            ).build()
+                        )
+                    },
+                    deleteFolder = { error("Server count does not confirm a single favorite") },
+                    deleteTopic = {
+                        itemDeletes++
+                        Result.success(TopicFavorResponse.getDefaultInstance())
+                    },
+                )
+
+                deletions.delete("1", "10", deleteFolderIfLast = true)
+
+                assertEquals(1, itemDeletes)
+                assertTrue(deletions.pending.value.isEmpty())
+            }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `failed last-folder deletion restores the row and retry deletes the folder`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {
@@ -119,6 +166,13 @@ class FavoriteTopicsModelTest {
                 fetchTopics = {
                     Result.success(
                         FavoriteTopicListResponse.newBuilder().addTopics(topic).setPages(1).build()
+                    )
+                },
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder().addFolders(
+                            FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(1)
+                        ).build()
                     )
                 },
                 deleteFolder = {
@@ -183,6 +237,14 @@ class FavoriteTopicsModelTest {
                         Result.success(
                             FavoriteTopicListResponse.newBuilder()
                                 .addAllTopics(topics).setPages(1).build()
+                        )
+                    },
+                    fetchFolders = {
+                        Result.success(
+                            FavoriteFolderListResponse.newBuilder().addFolders(
+                                FavoriteTopicFolder.newBuilder().setId("1")
+                                    .setTopicCount(topics.size)
+                            ).build()
                         )
                     },
                     deleteFolder = {

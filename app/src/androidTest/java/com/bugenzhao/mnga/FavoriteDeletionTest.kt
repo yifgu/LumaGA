@@ -21,6 +21,7 @@ import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
 import com.bugenzhao.mnga.protos.datamodel.Subject
 import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.AsyncRequest
+import com.bugenzhao.mnga.protos.service.FavoriteFolderListResponse
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
 import com.bugenzhao.mnga.protos.service.TopicFavorResponse
@@ -138,6 +139,13 @@ class FavoriteDeletionTest {
             fetchTopics = {
                 Result.success(
                     FavoriteTopicListResponse.newBuilder().addAllTopics(topics).setPages(1).build()
+                )
+            },
+            fetchFolders = {
+                Result.success(
+                    FavoriteFolderListResponse.newBuilder().addFolders(
+                        FavoriteTopicFolder.newBuilder().setId("7").setTopicCount(topics.size)
+                    ).build()
                 )
             },
             deleteFolder = { request ->

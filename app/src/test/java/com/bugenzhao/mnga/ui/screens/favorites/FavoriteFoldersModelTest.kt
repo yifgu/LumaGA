@@ -2,10 +2,10 @@ package com.bugenzhao.mnga.ui.screens.favorites
 
 import com.bugenzhao.mnga.LogicException
 import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
+import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.FavoriteFolderListResponse
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
-import com.bugenzhao.mnga.protos.datamodel.Topic
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +36,12 @@ class FavoriteFoldersModelTest {
                     Result.success(
                         FavoriteTopicListResponse.newBuilder()
                             .addTopics(Topic.newBuilder().setId("10")).setPages(1).build()
+                    )
+                },
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder()
+                            .addFolders(folder.toBuilder().setTopicCount(1)).build()
                     )
                 },
                 deleteFolder = {
@@ -88,6 +94,12 @@ class FavoriteFoldersModelTest {
                             .addTopics(Topic.newBuilder().setId("10")).setPages(1).build()
                     )
                 },
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder()
+                            .addFolders(folder.toBuilder().setTopicCount(1)).build()
+                    )
+                },
                 deleteFolder = { Result.success(FavoriteFolderModifyResponse.getDefaultInstance()) },
                 deleteTopic = { error("Must delete the folder") },
             )
@@ -112,6 +124,57 @@ class FavoriteFoldersModelTest {
             assertTrue(model.state.value.folders.isEmpty())
             assertFalse(model.state.value.isLoading)
             assertEquals("refresh failed", model.state.value.latestError?.error)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `slow folder refresh does not block subsequent folder deletions or restore stale folders`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            var folders = listOf("1", "2").map {
+                FavoriteTopicFolder.newBuilder().setId(it).setTopicCount(1).build()
+            }
+            val finish = CompletableDeferred<Unit>()
+            val deletions = FavoriteTopicDeletions(
+                scope,
+                fetchTopics = {
+                    Result.success(
+                        FavoriteTopicListResponse.newBuilder()
+                            .addTopics(Topic.newBuilder().setId("10")).setPages(1).build()
+                    )
+                },
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder().addAllFolders(folders).build()
+                    )
+                },
+                deleteFolder = { request ->
+                    folders = folders.filterNot { it.id == request.favoriteFolderModify.folderId }
+                    Result.success(FavoriteFolderModifyResponse.getDefaultInstance())
+                },
+                deleteTopic = { error("Must delete the folder") },
+            )
+            var requests = 0
+            val model = FavoriteFoldersModel(scope, deletions) {
+                val snapshot = FavoriteFolderListResponse.newBuilder().addAllFolders(folders).build()
+                if (requests++ == 1) finish.await()
+                Result.success(snapshot)
+            }
+            model.load()
+
+            deletions.delete("1", "10", deleteFolderIfLast = true)
+            assertTrue(model.state.value.isLoading)
+            deletions.delete("2", "10", deleteFolderIfLast = true)
+
+            assertTrue(folders.isEmpty())
+            assertTrue(deletions.pending.value.isEmpty())
+            assertTrue(model.state.value.folders.isEmpty())
+            finish.complete(Unit)
+            assertEquals(3, requests)
+            assertFalse(model.state.value.isLoading)
+            assertTrue(model.state.value.folders.isEmpty())
         } finally {
             scope.cancel()
         }

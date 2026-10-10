@@ -63,7 +63,7 @@ class FavoriteFoldersModel(
                 _state.value = _state.value.copy(
                     folders = _state.value.folders.filterNot { it.id == folderId },
                 )
-                load(force = true)
+                launch { load(force = true) }
             }
         }
     }
@@ -148,6 +148,14 @@ class FavoriteTopicDeletions(
     private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
         logicCallAsync(it, FavoriteTopicListResponse.parser())
     },
+    private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
+        logicCallAsync(
+            AsyncRequest.newBuilder()
+                .setFavoriteFolderList(FavoriteFolderListRequest.getDefaultInstance())
+                .build(),
+            FavoriteFolderListResponse.parser(),
+        )
+    },
     private val deleteFolder: suspend (AsyncRequest) -> Result<FavoriteFolderModifyResponse> = {
         logicCallAsync(it, FavoriteFolderModifyResponse.parser())
     },
@@ -177,7 +185,7 @@ class FavoriteTopicDeletions(
         scope.launch {
             try {
                 deleteMutex.withLock {
-                    // Check the server, not the visible page or optimistic pending rows.
+                    // Check server count too: topic parsing can omit invalid rows.
                     val lastTopic = if (deleteFolderIfLast) {
                         val response = fetchTopics(
                             AsyncRequest.newBuilder()
@@ -190,7 +198,10 @@ class FavoriteTopicDeletions(
                                 .build()
                         ).getOrThrow()
                         response.pages == 1 &&
-                            response.topicsList.singleOrNull()?.id == topicId
+                            response.topicsList.singleOrNull()?.id == topicId &&
+                            fetchFolders().getOrThrow().foldersList.any {
+                                it.id == folderId && it.topicCount == 1
+                            }
                     } else {
                         false
                     }
