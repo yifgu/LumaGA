@@ -3,6 +3,7 @@ package com.bugenzhao.mnga.ui.screens.favorites
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bugenzhao.mnga.LogicException
 import com.bugenzhao.mnga.logicCallAsync
 import com.bugenzhao.mnga.model.PagingDataSource
 import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
@@ -16,22 +17,50 @@ import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyRequest
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** Favorite folders of the logged-in user (SS15). */
-class FavoriteFoldersModel(private val scope: CoroutineScope) {
-    val folders = MutableStateFlow<List<FavoriteTopicFolder>>(emptyList())
+class FavoriteFoldersModel(
+    private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
+        logicCallAsync(
+            AsyncRequest.newBuilder()
+                .setFavoriteFolderList(FavoriteFolderListRequest.getDefaultInstance())
+                .build(),
+            FavoriteFolderListResponse.parser(),
+        )
+    },
+) {
+    data class State(
+        val folders: List<FavoriteTopicFolder> = emptyList(),
+        val isLoading: Boolean = false,
+        val hasLoaded: Boolean = false,
+        val latestError: LogicException? = null,
+    )
+
+    private val _state = MutableStateFlow(State())
+    val state: StateFlow<State> = _state
 
     suspend fun load(force: Boolean = false) {
-        if (folders.value.isEmpty() || force) {
-            val result = logicCallAsync(
-                AsyncRequest.newBuilder()
-                    .setFavoriteFolderList(FavoriteFolderListRequest.getDefaultInstance())
-                    .build(),
-                FavoriteFolderListResponse.parser(),
+        if (_state.value.isLoading || (_state.value.hasLoaded && !force)) return
+        _state.value = _state.value.copy(isLoading = true, latestError = null)
+        try {
+            fetchFolders().fold(
+                onSuccess = { response ->
+                    _state.value = _state.value.copy(
+                        folders = response.foldersList,
+                        hasLoaded = true,
+                    )
+                },
+                onFailure = { error ->
+                    _state.value = _state.value.copy(
+                        latestError = error as? LogicException
+                            ?: LogicException(error.message ?: "error"),
+                    )
+                },
             )
-            result.onSuccess { response -> folders.value = response.foldersList }
+        } finally {
+            _state.value = _state.value.copy(isLoading = false)
         }
     }
 
@@ -73,7 +102,7 @@ class FavoriteFoldersModel(private val scope: CoroutineScope) {
  */
 class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
-    val foldersModel = FavoriteFoldersModel(viewModelScope)
+    val foldersModel = FavoriteFoldersModel()
 
     /** The folder the user last selected; kept across pop-backs and process death. */
     var currentFolderId: String?

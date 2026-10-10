@@ -732,6 +732,14 @@ pub async fn get_topic_details(
     Ok(response)
 }
 
+fn check_topic_favor_result(result: ServiceResult<Value>) -> ServiceResult<()> {
+    match result {
+        // NGA can put a successful write's confirmation in the error envelope.
+        Err(ServiceError::Nga(error)) if error.info.trim() == "操作成功" => Ok(()),
+        other => other.map(|_| ()),
+    }
+}
+
 pub async fn topic_favor(request: TopicFavorRequest) -> ServiceResult<TopicFavorResponse> {
     // 注意：del 的 tid 参数比较特殊，需要同时发送两种形态做兼容：
     // - `del=<tid>`：官方语义（tid 逗号串，可批量），见
@@ -759,12 +767,14 @@ pub async fn topic_favor(request: TopicFavorRequest) -> ServiceResult<TopicFavor
     let folder_id = request.get_folder_id();
     params.push(("folder", folder_id));
 
-    let _value = fetch_json_value(
-        "nuke.php",
-        vec![("__lib", "topic_favor_v2"), ("__act", act)],
-        params,
-    )
-    .await?;
+    check_topic_favor_result(
+        fetch_json_value(
+            "nuke.php",
+            vec![("__lib", "topic_favor_v2"), ("__act", act)],
+            params,
+        )
+        .await,
+    )?;
 
     let response = update_topic_cached_favor_response(request.get_topic_id(), folder_id, op)?;
 
@@ -801,6 +811,58 @@ pub async fn get_user_topic_list(
 mod test {
     use super::*;
     use crate::{constants::REVIEW_UID, fetch::with_fetch_check, user::UserController};
+
+    #[test]
+    fn test_last_favorite_delete_success() {
+        let result = Err(ServiceError::Nga(ErrorMessage {
+            info: "操作成功".to_owned(),
+            ..Default::default()
+        }));
+        check_topic_favor_result(result).unwrap();
+
+        let mut response = TopicFavorResponse {
+            is_favored: true,
+            folder_ids: vec!["1".to_owned()].into(),
+            ..Default::default()
+        };
+        mutate_favor_response("", FavorOp::Remove, &mut response);
+        assert!(!response.is_favored);
+        assert!(response.folder_ids.is_empty());
+    }
+
+    #[test]
+    fn test_topic_favor_genuine_errors_are_preserved() {
+        for info in ["未登录", "找不到用户", "操作成功失败", "没有权限"] {
+            let result = Err(ServiceError::Nga(ErrorMessage {
+                info: info.to_owned(),
+                ..Default::default()
+            }));
+            assert!(matches!(
+                check_topic_favor_result(result),
+                Err(ServiceError::Nga(error)) if error.info == info
+            ));
+        }
+        assert!(matches!(
+            check_topic_favor_result(Err(ServiceError::MissingField("data".to_owned()))),
+            Err(ServiceError::MissingField(_))
+        ));
+        check_topic_favor_result(Ok(serde_json::json!({"0": "操作成功"}))).unwrap();
+    }
+
+    #[test]
+    fn test_remove_last_favorite_folder() {
+        let mut response = TopicFavorResponse {
+            is_favored: true,
+            folder_ids: vec!["1".to_owned(), "2".to_owned()].into(),
+            ..Default::default()
+        };
+        mutate_favor_response("1", FavorOp::Remove, &mut response);
+        assert!(response.is_favored);
+        assert_eq!(response.folder_ids.as_slice(), &["2"]);
+        mutate_favor_response("2", FavorOp::Remove, &mut response);
+        assert!(!response.is_favored);
+        assert!(response.folder_ids.is_empty());
+    }
 
     #[tokio::test]
     async fn test_extract_error_shapes() {

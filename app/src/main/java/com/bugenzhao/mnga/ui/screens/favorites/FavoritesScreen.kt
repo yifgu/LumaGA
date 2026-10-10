@@ -109,16 +109,15 @@ fun FavoritesScreen(navigator: Navigator, initialFolderId: String? = null) {
 
     val favoritesVM: FavoritesViewModel = viewModel()
     val foldersModel = favoritesVM.foldersModel
-    val folders by foldersModel.folders.collectAsState()
+    val folderState by foldersModel.state.collectAsState()
+    val folders = folderState.folders
     var currentFolder by remember { mutableStateOf<FavoriteTopicFolder?>(null) }
 
     // Load folders on entry, keeping the previous selection when possible.
     // The ViewModel (and the loaded folder list) survives pop-backs, so only
     // a first entry or process death triggers a fetch.
     LaunchedEffect(Unit) {
-        if (currentFolder == null && foldersModel.folders.value.isEmpty()) {
-            foldersModel.load(force = true)
-        }
+        foldersModel.load()
     }
     LaunchedEffect(folders) {
         if (folders.isNotEmpty()) {
@@ -221,8 +220,22 @@ fun FavoritesScreen(navigator: Navigator, initialFolderId: String? = null) {
         Box(Modifier.fillMaxSize().padding(padding)) {
             val folder = currentFolder
             if (folder == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                PullToRefreshBox(
+                    isRefreshing = folderState.isLoading,
+                    onRefresh = { scope.launch { foldersModel.load(force = true) } },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        when {
+                            folderState.latestError != null ->
+                                ErrorPlaceholder(folderState.latestError!!) {
+                                    scope.launch { foldersModel.load(force = true) }
+                                }
+                            folderState.hasLoaded && folders.isEmpty() ->
+                                ListPlaceholder(L.str(context, "No Favorites"))
+                            else -> CircularProgressIndicator()
+                        }
+                    }
                 }
             } else {
                 FavoriteTopicList(folder = folder, navigator = navigator)

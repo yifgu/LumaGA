@@ -245,7 +245,8 @@ pub fn extract_pages(
     let rows_per_page = extract_string(package, rows_per_page_xpath)?
         .parse::<u32>()
         .ok()
-        .unwrap_or(default_per_page);
+        .filter(|&rows| rows > 0)
+        .unwrap_or(default_per_page.max(1));
 
     let pages = rows / rows_per_page + u32::from(rows % rows_per_page != 0);
 
@@ -326,6 +327,40 @@ pub fn server_today_string() -> String {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_empty_favorite_pages() {
+        for page_size in [
+            "<__T__ROWS_PAGE>0</__T__ROWS_PAGE>",
+            "<__T__ROWS_PAGE>35</__T__ROWS_PAGE>",
+            "",
+        ] {
+            let xml = format!("<root><__ROWS>0</__ROWS>{page_size}<__T/></root>");
+            let package = sxd_document::parser::parse(&xml).unwrap();
+            let topics = extract_nodes(&package, "/root/__T/item", |nodes| nodes).unwrap();
+            assert!(topics.is_empty());
+            assert_eq!(
+                extract_pages(&package, "/root/__ROWS", "/root/__T__ROWS_PAGE", 35).unwrap(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn test_zero_page_size_uses_default() {
+        let package = sxd_document::parser::parse(
+            "<root><__ROWS>36</__ROWS><__T__ROWS_PAGE>0</__T__ROWS_PAGE></root>",
+        )
+        .unwrap();
+        assert_eq!(
+            extract_pages(&package, "/root/__ROWS", "/root/__T__ROWS_PAGE", 35).unwrap(),
+            2
+        );
+        assert_eq!(
+            extract_pages(&package, "/root/__ROWS", "/root/__T__ROWS_PAGE", 0).unwrap(),
+            36
+        );
+    }
 
     #[test]
     fn test_sanitize_control_chars_in_json_strings() {
