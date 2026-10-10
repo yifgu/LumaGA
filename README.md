@@ -26,11 +26,20 @@ Home | Topic list | Topic detail | Topic detail
   wallpaper-based colors, or select a fixed accent in the same picker.
   Light/dark overrides also control system-bar icons. Classic mode keeps its
   saved fixed accent and original palette.
-- Predictive back is enabled on Android 13+. On Android 14+, screen transitions
-  follow the gesture and return to the current screen if cancelled. Back from the home
-  screen is handled by Android (including the back-to-home preview); Android
+- Predictive back is enabled on Android 13+. On Android 14+, each screen opens
+  in an internal Activity, using Android's cross-Activity predictive preview
+  like [LibChecker](https://github.com/LibChecker/LibChecker). Cancelling keeps
+  the current screen; committing returns to the previous Activity. This avoids
+  relying on app-delivered gesture progress, which was missing on the reported
+  HONOR device with single-Activity Navigation Compose. Android 13 and older
+  keep Navigation Compose and its existing transitions.
+  Back from the home screen is handled by Android (including the back-to-home preview); Android
   12 and older retain double-back-to-exit. On Android 13–14, enable predictive
   back animations in Developer options to see the system preview.
+  On a physical phone, verify left/right-edge cancellation and completion
+  through Home → Personal Center → Settings → About, toolbar/button back,
+  dialog dismissal, and returning to the same topic/scroll position. Tests
+  that inject AndroidX back events alone cannot verify the system preview.
 - `mnga://` deep links are supported, e.g. `mnga://forum/f/722` opens a forum
   directly; links copied to the clipboard are also detected and opened
   automatically when the app comes to the foreground.

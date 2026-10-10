@@ -102,7 +102,7 @@ class LumaGAApplication : Application() {
 
         // 实验室功能「启动自动签到」：应用回到前台（启动/从后台切回）时补一次
         // 签到检查。Rust 缓存判定当天已签则零网络开销；跨天由每次回前台兜底。
-        // 单 Activity 架构下 onActivityResumed 只发生在启动/回前台，频率极低。
+        // 切换 Activity 时也会触发；Rust 缓存避免重复签到请求。
         registerActivityLifecycleCallbacks(
             object : android.app.Application.ActivityLifecycleCallbacks {
                 override fun onActivityResumed(activity: android.app.Activity) {

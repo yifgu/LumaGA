@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -56,7 +57,11 @@ import kotlinx.coroutines.flow.filter
 
 /** Root composable: theme, navigation stack and global overlays. */
 @Composable
-fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
+fun LumaGARoot(
+    onNewIntent: (android.content.Intent) -> Unit,
+    initialRoute: Route = Route.ForumList,
+    navigationActivity: android.app.Activity? = null,
+) {
     val prefs = App.prefs
     val themeColor by prefs.themeColorRaw.flow.collectAsState()
     val colorScheme by prefs.colorSchemeRaw.flow.collectAsState()
@@ -68,7 +73,9 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
         useDynamicColors = useDynamicColors,
     ) {
         val navController = rememberNavController()
-        val navigator = remember { Navigator(navController, listOf(Route.ForumList)) }
+        val navigator = remember {
+            Navigator(navController, listOf(initialRoute), navigationActivity)
+        }
         val editor = remember { com.bugenzhao.mnga.ui.editor.EditorController(appScope) }
 
         // Opaque theme background under the navigation stack: during the
@@ -76,9 +83,21 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
         // and without a solid layer beneath them the (always light) window
         // background flashes white in dark mode.
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            NavigationHost(navigator, editor)
+            if (navigationActivity != null &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+            ) {
+                // One destination per Activity: no NavHost back callback can
+                // suppress Android's cross-Activity predictive animation.
+                RouteDispatcher(navigator, initialRoute, editor)
+            } else {
+                NavigationHost(navigator, editor)
+            }
         }
-        GlobalOverlays(navigator, editor)
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+        if (lifecycleState == Lifecycle.State.RESUMED) {
+            GlobalOverlays(navigator, editor)
+        }
 
         // Pasteboard deep-link handling: when the newest clipboard entry is a
         // navigable NGA/LumaGA link that has not been jumped to yet, navigate
@@ -97,7 +116,6 @@ fun LumaGARoot(onNewIntent: (android.content.Intent) -> Unit) {
                 view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
             }
         }
-        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
         LaunchedEffect(lifecycleOwner) {
             lifecycleOwner.lifecycle.currentStateFlow
                 .filter { it == androidx.lifecycle.Lifecycle.State.RESUMED }

@@ -1,7 +1,6 @@
 package com.bugenzhao.mnga.ui.nav
 
 import android.net.Uri
-import android.os.Bundle
 import android.util.Base64
 import androidx.navigation.NavBackStackEntry
 import com.bugenzhao.mnga.protos.datamodel.ForumId
@@ -97,23 +96,33 @@ object RouteCodec {
     }
 
     /** Decodes the route carried by a back-stack entry; null when unparseable. */
-    fun decode(entry: NavBackStackEntry): Route? {
-        val args = entry.arguments
-        return when (entry.destination.route) {
+    fun decode(entry: NavBackStackEntry): Route? =
+        decode(entry.destination.route, entry.arguments?.getString("payload"))
+
+    /** Restores a destination from an internal Activity intent. */
+    fun decode(encoded: String): Route? {
+        val hasPayload = '/' in encoded
+        val pattern = if (hasPayload) encoded.substringBefore('/') + "/{payload}" else encoded
+        val payload = if (hasPayload) Uri.decode(encoded.substringAfter('/')) else null
+        return decode(pattern, payload)
+    }
+
+    private fun decode(pattern: String?, payload: String?): Route? {
+        return when (pattern) {
             ROUTE_FORUM_LIST -> Route.ForumList
-            ROUTE_TOPIC_LIST -> decodePayload(args) { decodeTopicList(it) }
-            ROUTE_TOPIC_DETAILS -> decodePayload(args) { decodeTopicDetails(it) }
-            ROUTE_USER_PROFILE -> decodePayload(args) { decodeUserProfile(it) }
+            ROUTE_TOPIC_LIST -> decodePayload(payload) { decodeTopicList(it) }
+            ROUTE_TOPIC_DETAILS -> decodePayload(payload) { decodeTopicDetails(it) }
+            ROUTE_USER_PROFILE -> decodePayload(payload) { decodeUserProfile(it) }
             ROUTE_GLOBAL_SEARCH -> Route.GlobalSearch
-            ROUTE_TOPIC_SEARCH -> decodePayload(args) { decodeTopicSearch(it) }
+            ROUTE_TOPIC_SEARCH -> decodePayload(payload) { decodeTopicSearch(it) }
             ROUTE_HOT_TOPICS -> Route.HotTopics
             ROUTE_FAVORITES -> Route.Favorites
             ROUTE_HISTORY -> Route.History
             ROUTE_SHORT_MESSAGES -> Route.ShortMessages
-            ROUTE_SHORT_MESSAGE_DETAILS -> decodePayload(args) { decodeShortMessageDetails(it) }
+            ROUTE_SHORT_MESSAGE_DETAILS -> decodePayload(payload) { decodeShortMessageDetails(it) }
             ROUTE_SUBFORUMS -> Route.Subforums
-            ROUTE_SUBFORUM_LIST -> decodePayload(args) { decodeSubforumList(it) }
-            ROUTE_UNKNOWN_FORUM -> decodePayload(args) { decodeUnknownForum(it) }
+            ROUTE_SUBFORUM_LIST -> decodePayload(payload) { decodeSubforumList(it) }
+            ROUTE_UNKNOWN_FORUM -> decodePayload(payload) { decodeUnknownForum(it) }
             ROUTE_CACHE_SETTINGS -> Route.CacheSettings
             ROUTE_BLOCK_WORDS -> Route.BlockWords
             ROUTE_BLOCKED_USERS -> Route.BlockedUsers
@@ -144,10 +153,10 @@ object RouteCodec {
     // -- decoding helpers -----------------------------------------------------
 
     private inline fun decodePayload(
-        args: Bundle?,
+        payload: String?,
         decode: (JSONObject) -> Route,
     ): Route? {
-        val payload = args?.getString("payload") ?: return null
+        if (payload == null) return null
         return runCatching { decode(JSONObject(payload)) }.getOrNull()
     }
 

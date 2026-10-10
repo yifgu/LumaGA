@@ -35,6 +35,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Standard launch mode keeps each destination in the same task.
+             No back callback: Android owns the cross-Activity preview. -->
+        <activity
+            android:name=".ScreenActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Launcher entries: two aliases so the home-screen icon can be
              switched at runtime (Settings -> Use NGA Classic Icon) by
              enabling/disabling one alias; only one may be enabled. -->
