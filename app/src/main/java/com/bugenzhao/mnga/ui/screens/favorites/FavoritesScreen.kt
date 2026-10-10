@@ -46,9 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -433,22 +431,27 @@ private fun FavoriteTopicList(folder: FavoriteTopicFolder, navigator: Navigator)
     // survives pop-backs (composition is disposed, ViewModel is not), so
     // returning here does not refetch.
     val favoritesVM: FavoritesViewModel = viewModel()
+    val topicsModel = favoritesVM.topicsModel
     val dataSource = favoritesVM.topicDataSource(folder.id)
     val state by dataSource.state.collectAsState()
+    val deletingIds by topicsModel.deletingIds.collectAsState()
 
     // Load on first entry only: after a pop-back the ViewModel still holds
     // the data, so notLoaded is false and nothing is refetched.
     LaunchedEffect(folder.id) {
         if (dataSource.notLoaded) dataSource.initialLoad()
     }
+    LaunchedEffect(dataSource, state.items.isEmpty(), state.isLoading, state.latestError) {
+        if (state.items.isEmpty() && !state.isLoading && state.latestError == null &&
+            !dataSource.notLoaded && dataSource.hasMore
+        ) {
+            dataSource.loadMore()
+        }
+    }
 
     val listState = rememberLazyListState()
-    // Optimistically hidden rows after swipe-delete (no refresh, no flash).
-    val hiddenIds = remember(folder.id) { mutableStateListOf<String>() }
-    // Ids with a delete RPC in flight: guards against confirmValueChange
-    // firing more than once for a single swipe sending duplicate deletes.
-    val deletingIds = remember(folder.id) { mutableStateSetOf<String>() }
-    val visibleItems = state.items.filter { it.id !in hiddenIds }
+    // Pending rows stay hidden even if the composition is disposed and recreated.
+    val visibleItems = state.items.filter { it.id !in deletingIds }
 
     // Use the same global unfavorite request as the topic-details menu. The
     // folder-specific variant can return success without actually removing
@@ -481,7 +484,7 @@ private fun FavoriteTopicList(folder: FavoriteTopicFolder, navigator: Navigator)
         }
         return false to lastError
     }
-    fun deleteFavorite(topicId: String, onSettled: (Boolean) -> Unit) {
+    fun deleteFavorite(topicId: String) {
         // App scope deliberately outlives this composition: leaving the page
         // must not cancel deletes that are waiting behind the mutex.
         appScope.launch {
@@ -502,13 +505,7 @@ private fun FavoriteTopicList(folder: FavoriteTopicFolder, navigator: Navigator)
                         ),
                     )
                 }
-                if (ok) {
-                    // The entry-scoped data source survives while this route is
-                    // covered. Remove the confirmed item there as well as from
-                    // the optimistic UI, otherwise recomposition brings it back.
-                    dataSource.removeItem(topicId)
-                }
-                onSettled(ok)
+                topicsModel.finishDelete(topicId, success = ok)
             }
         }
     }
@@ -553,12 +550,8 @@ private fun FavoriteTopicList(folder: FavoriteTopicFolder, navigator: Navigator)
                     val dismissState = rememberSwipeToDismissBoxState(
                         confirmValueChange = { value ->
                             if (value == SwipeToDismissBoxValue.EndToStart) {
-                                if (deletingIds.add(topic.id)) {
-                                    hiddenIds.add(topic.id)
-                                    deleteFavorite(topic.id) {
-                                        deletingIds.remove(topic.id)
-                                        hiddenIds.remove(topic.id)
-                                    }
+                                if (topicsModel.beginDelete(topic.id)) {
+                                    deleteFavorite(topic.id)
                                 }
                                 true
                             } else {

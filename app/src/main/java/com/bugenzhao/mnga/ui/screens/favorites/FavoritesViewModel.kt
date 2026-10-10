@@ -17,8 +17,13 @@ import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyRequest
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -114,15 +119,66 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
             savedStateHandle["currentFolderId"] = value
         }
 
-    // One paged topic list per folder, cached so switching folders back and
-    // forth does not refetch. Folders are few, so the cache is small.
+    val topicsModel = FavoriteTopicsModel(viewModelScope)
+
+    fun topicDataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
+        topicsModel.dataSource(folderId)
+}
+
+/** Coordinates app-scoped delete requests, including when a favorites entry is reopened. */
+class FavoriteTopicDeletions {
+    private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
+    val deletingIds: StateFlow<Set<String>> = _deletingIds
+    private val _confirmedIds = MutableSharedFlow<String>()
+    val confirmedIds: SharedFlow<String> = _confirmedIds
+
+    fun beginDelete(topicId: String): Boolean {
+        if (topicId in _deletingIds.value) return false
+        _deletingIds.value = _deletingIds.value + topicId
+        return true
+    }
+
+    suspend fun finishDelete(topicId: String, success: Boolean) {
+        if (success) _confirmedIds.emit(topicId)
+        _deletingIds.value = _deletingIds.value - topicId
+    }
+
+    companion object {
+        val shared = FavoriteTopicDeletions()
+    }
+}
+
+/** Retains folder snapshots and observes deletions for the lifetime of its entry. */
+class FavoriteTopicsModel(
+    private val scope: CoroutineScope,
+    private val deletions: FavoriteTopicDeletions = FavoriteTopicDeletions.shared,
+    private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
+        logicCallAsync(it, FavoriteTopicListResponse.parser())
+    },
+) {
+    val deletingIds: StateFlow<Set<String>> = deletions.deletingIds
+
     private val topicSources =
         mutableMapOf<String, PagingDataSource<FavoriteTopicListResponse, Topic>>()
 
-    fun topicDataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
+    init {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            deletions.confirmedIds.collect { topicId ->
+                // The RPC unfavorites globally, including other active entries.
+                topicSources.values.forEach { it.removeItem(topicId) }
+            }
+        }
+    }
+
+    fun beginDelete(topicId: String): Boolean = deletions.beginDelete(topicId)
+
+    suspend fun finishDelete(topicId: String, success: Boolean) =
+        deletions.finishDelete(topicId, success)
+
+    fun dataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
         topicSources.getOrPut(folderId) {
             PagingDataSource(
-                scope = viewModelScope,
+                scope = scope,
                 responseParser = { FavoriteTopicListResponse.parser() },
                 buildRequest = { page ->
                     AsyncRequest.newBuilder()
@@ -138,6 +194,7 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
                     Pair(response.topicsList, response.pages.toInt().takeIf { it > 0 })
                 },
                 id = { it.id },
+                fetchResponse = fetchTopics,
             )
         }
 }
