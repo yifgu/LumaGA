@@ -113,6 +113,8 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
+          TAG_REFS="$(git ls-remote --tags origin "refs/tags/v$VERSION")"
+          test -z "$TAG_REFS" || { echo "::error::Release tag already exists; refusing to publish."; exit 1; }
           gh run download "$RUN_ID" --name app-release --dir release
           APK="release/LumaGA_${VERSION}.apk"
           test -f "$APK"
