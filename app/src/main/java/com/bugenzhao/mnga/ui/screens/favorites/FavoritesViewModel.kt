@@ -19,6 +19,8 @@ import com.bugenzhao.mnga.protos.service.FavoriteTopicListRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Favorite folders of the logged-in user (SS15). */
 class FavoriteFoldersModel(
@@ -40,9 +42,10 @@ class FavoriteFoldersModel(
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
+    private val loadMutex = Mutex()
 
-    suspend fun load(force: Boolean = false) {
-        if (_state.value.isLoading || (_state.value.hasLoaded && !force)) return
+    suspend fun load(force: Boolean = false) = loadMutex.withLock {
+        if (_state.value.hasLoaded && !force) return@withLock
         _state.value = _state.value.copy(isLoading = true, latestError = null)
         try {
             fetchFolders().fold(

@@ -72,12 +72,40 @@ class FavoriteFoldersModelTest {
         val load = launch { model.load() }
         started.await()
         assertTrue(model.state.value.isLoading)
-        model.load(force = true)
+        val duplicate = launch { model.load() }
         assertEquals(1, requests)
         finish.complete(Unit)
         load.join()
+        duplicate.join()
         assertFalse(model.state.value.isLoading)
         assertTrue(model.state.value.hasLoaded)
+    }
+
+    @Test
+    fun `forced folder refresh waits for the initial load instead of being dropped`() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val folder = FavoriteTopicFolder.newBuilder().setId("1").build()
+        var requests = 0
+        val model = FavoriteFoldersModel {
+            if (requests++ == 0) {
+                started.complete(Unit)
+                finish.await()
+                Result.success(FavoriteFolderListResponse.getDefaultInstance())
+            } else {
+                Result.success(FavoriteFolderListResponse.newBuilder().addFolders(folder).build())
+            }
+        }
+        val load = launch { model.load() }
+        started.await()
+        val refresh = launch { model.load(force = true) }
+        finish.complete(Unit)
+        load.join()
+        refresh.join()
+
+        assertEquals(2, requests)
+        assertEquals(listOf(folder), model.state.value.folders)
+        assertFalse(model.state.value.isLoading)
     }
 
     @Test
