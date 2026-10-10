@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.bugenzhao.mnga.LogicException
 import com.bugenzhao.mnga.logicCallAsync
 import com.bugenzhao.mnga.model.PagingDataSource
-import com.bugenzhao.mnga.model.appScope
 import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
 import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.AsyncRequest
@@ -18,23 +17,13 @@ import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyRequest
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
-import com.bugenzhao.mnga.protos.service.TopicFavorRequest
-import com.bugenzhao.mnga.protos.service.TopicFavorResponse
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Favorite folders of the logged-in user (SS15). */
 class FavoriteFoldersModel(
-    scope: CoroutineScope? = null,
-    deletions: FavoriteTopicDeletions = FavoriteTopicDeletions.shared,
     private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
         logicCallAsync(
             AsyncRequest.newBuilder()
@@ -54,29 +43,15 @@ class FavoriteFoldersModel(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
     private val loadMutex = Mutex()
-    private val removedDuringLoad = mutableSetOf<String>()
-
-    init {
-        scope?.launch(start = CoroutineStart.UNDISPATCHED) {
-            deletions.deletedFolders.collect { folderId ->
-                if (_state.value.isLoading) removedDuringLoad.add(folderId)
-                _state.value = _state.value.copy(
-                    folders = _state.value.folders.filterNot { it.id == folderId },
-                )
-                launch { load(force = true) }
-            }
-        }
-    }
 
     suspend fun load(force: Boolean = false) = loadMutex.withLock {
         if (_state.value.hasLoaded && !force) return@withLock
-        removedDuringLoad.clear()
         _state.value = _state.value.copy(isLoading = true, latestError = null)
         try {
             fetchFolders().fold(
                 onSuccess = { response ->
                     _state.value = _state.value.copy(
-                        folders = response.foldersList.filterNot { it.id in removedDuringLoad },
+                        folders = response.foldersList,
                         hasLoaded = true,
                     )
                 },
@@ -130,7 +105,7 @@ class FavoriteFoldersModel(
  */
 class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
-    val foldersModel = FavoriteFoldersModel(viewModelScope)
+    val foldersModel = FavoriteFoldersModel()
 
     /** The folder the user last selected; kept across pop-backs and process death. */
     var currentFolderId: String?
@@ -139,139 +114,15 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
             savedStateHandle["currentFolderId"] = value
         }
 
-    val topicsModel = FavoriteTopicsModel(viewModelScope)
-}
-
-/** Coordinates app-scoped delete requests, including when a favorites entry is reopened. */
-class FavoriteTopicDeletions(
-    private val scope: CoroutineScope = appScope,
-    private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
-        logicCallAsync(it, FavoriteTopicListResponse.parser())
-    },
-    private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
-        logicCallAsync(
-            AsyncRequest.newBuilder()
-                .setFavoriteFolderList(FavoriteFolderListRequest.getDefaultInstance())
-                .build(),
-            FavoriteFolderListResponse.parser(),
-        )
-    },
-    private val deleteFolder: suspend (AsyncRequest) -> Result<FavoriteFolderModifyResponse> = {
-        logicCallAsync(it, FavoriteFolderModifyResponse.parser())
-    },
-    private val deleteTopic: suspend (AsyncRequest) -> Result<TopicFavorResponse> = {
-        logicCallAsync(it, TopicFavorResponse.parser())
-    },
-) {
-    data class Item(val folderId: String, val topicId: String)
-
-    private val _pending = MutableStateFlow<Set<Item>>(emptySet())
-    val pending: StateFlow<Set<Item>> = _pending
-    private val _confirmed = MutableSharedFlow<Item>()
-    val confirmed: SharedFlow<Item> = _confirmed
-    private val _deletedFolders = MutableSharedFlow<String>()
-    val deletedFolders: SharedFlow<String> = _deletedFolders
-    private val deleteMutex = Mutex()
-
-    fun delete(
-        folderId: String,
-        topicId: String,
-        deleteFolderIfLast: Boolean = false,
-        onFailure: (Throwable) -> Unit = {},
-    ): Boolean {
-        val item = Item(folderId, topicId)
-        if (item in _pending.value) return false
-        _pending.value = _pending.value + item
-        scope.launch {
-            try {
-                deleteMutex.withLock {
-                    // Check server count too: topic parsing can omit invalid rows.
-                    val lastTopic = if (deleteFolderIfLast) {
-                        val response = fetchTopics(
-                            AsyncRequest.newBuilder()
-                                .setFavoriteTopicList(
-                                    FavoriteTopicListRequest.newBuilder()
-                                        .setFolderId(folderId)
-                                        .setPage(1)
-                                        .build()
-                                )
-                                .build()
-                        ).getOrThrow()
-                        response.pages == 1 &&
-                            response.topicsList.singleOrNull()?.id == topicId &&
-                            fetchFolders().getOrThrow().foldersList.any {
-                                it.id == folderId && it.topicCount == 1
-                            }
-                    } else {
-                        false
-                    }
-                    if (lastTopic) {
-                        deleteFolder(
-                            AsyncRequest.newBuilder()
-                                .setFavoriteFolderModify(
-                                    FavoriteFolderModifyRequest.newBuilder()
-                                        .setFolderId(folderId)
-                                        .setDelete(true)
-                                        .build()
-                                )
-                                .build()
-                        ).getOrThrow()
-                        _confirmed.emit(item)
-                        _deletedFolders.emit(folderId)
-                    } else {
-                        deleteTopic(
-                            AsyncRequest.newBuilder()
-                                .setTopicFavor(
-                                    TopicFavorRequest.newBuilder()
-                                        .setFolderId(folderId)
-                                        .setTopicId(topicId)
-                                        .setOperation(TopicFavorRequest.Operation.DELETE)
-                                        .build()
-                                )
-                                .build()
-                        ).getOrThrow()
-                        _confirmed.emit(item)
-                    }
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                onFailure(error)
-            } finally {
-                _pending.value = _pending.value - item
-            }
-        }
-        return true
-    }
-
-    companion object {
-        val shared = FavoriteTopicDeletions()
-    }
-}
-
-/** Retains folder snapshots and observes deletions for the lifetime of its entry. */
-class FavoriteTopicsModel(
-    private val scope: CoroutineScope,
-    val deletions: FavoriteTopicDeletions = FavoriteTopicDeletions.shared,
-    private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
-        logicCallAsync(it, FavoriteTopicListResponse.parser())
-    },
-) {
+    // One paged topic list per folder, cached so switching folders back and
+    // forth does not refetch. Folders are few, so the cache is small.
     private val topicSources =
         mutableMapOf<String, PagingDataSource<FavoriteTopicListResponse, Topic>>()
 
-    init {
-        scope.launch(start = CoroutineStart.UNDISPATCHED) {
-            deletions.confirmed.collect { item ->
-                topicSources[item.folderId]?.removeItem(item.topicId)
-            }
-        }
-    }
-
-    fun dataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
+    fun topicDataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
         topicSources.getOrPut(folderId) {
             PagingDataSource(
-                scope = scope,
+                scope = viewModelScope,
                 responseParser = { FavoriteTopicListResponse.parser() },
                 buildRequest = { page ->
                     AsyncRequest.newBuilder()
@@ -287,7 +138,6 @@ class FavoriteTopicsModel(
                     Pair(response.topicsList, response.pages.toInt().takeIf { it > 0 })
                 },
                 id = { it.id },
-                fetchResponse = fetchTopics,
             )
         }
 }
