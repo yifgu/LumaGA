@@ -1,6 +1,9 @@
 package com.bugenzhao.mnga
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.SystemClock
 import androidx.navigation.NavHostController
 import androidx.test.core.app.ActivityScenario
@@ -77,6 +80,33 @@ class ActivityNavigationTest {
             instrumentation.runOnMainSync {
                 assertTrue(restored.isFinishing || restored.isDestroyed)
                 assertTrue(words.isFinishing || words.isDestroyed)
+            }
+        }
+    }
+
+    @Test
+    fun copyingCurrentTopicLinkDoesNotUndoActivityBack() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var root: MainActivity
+            scenario.onActivity { root = it }
+            SystemClock.sleep(700)
+            val generation = App.foregroundGeneration
+            val route = Route.TopicDetails("12345")
+            scenario.onActivity { navigator(it, Route.ForumList).push(route) }
+            val topic = awaitResumed { it is ScreenActivity } as ScreenActivity
+            instrumentation.runOnMainSync {
+                val clipboard = topic.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("link", "mnga://topic/12345"))
+                navigator(topic, route).pop()
+            }
+            awaitResumed { it === root }
+            SystemClock.sleep(1000)
+            instrumentation.runOnMainSync {
+                assertEquals(generation, App.foregroundGeneration)
+                assertTrue(
+                    ActivityLifecycleMonitorRegistry.getInstance()
+                        .getActivitiesInStage(Stage.RESUMED).any { it === root },
+                )
             }
         }
     }

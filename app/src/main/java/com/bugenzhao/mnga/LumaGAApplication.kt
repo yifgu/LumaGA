@@ -26,6 +26,10 @@ import kotlinx.coroutines.launch
 
 /** Application-scoped singletons, mirroring the SwiftUI environment objects. */
 object App {
+    val editor by lazy { com.bugenzhao.mnga.ui.editor.EditorController(appScope) }
+    var foregroundGeneration: Long = 0
+        internal set
+    var clipboardGeneration: Long = -1
     lateinit var prefs: PreferencesStorage
     lateinit var authStorage: AuthStorage
     lateinit var blockWords: BlockWordsStorage
@@ -46,6 +50,7 @@ object App {
 
 class LumaGAApplication : Application() {
 
+    private var startedActivities = 0
     override fun onCreate() {
         super.onCreate()
 
@@ -111,10 +116,14 @@ class LumaGAApplication : Application() {
                     }
                 }
 
-                override fun onActivityStarted(activity: android.app.Activity) {}
+                override fun onActivityStarted(activity: android.app.Activity) {
+                    if (startedActivities++ == 0) App.foregroundGeneration++
+                }
                 override fun onActivityDestroyed(activity: android.app.Activity) {}
                 override fun onActivityPaused(activity: android.app.Activity) {}
-                override fun onActivityStopped(activity: android.app.Activity) {}
+                override fun onActivityStopped(activity: android.app.Activity) {
+                    startedActivities--
+                }
                 override fun onActivityCreated(
                     activity: android.app.Activity,
                     savedInstanceState: android.os.Bundle?,

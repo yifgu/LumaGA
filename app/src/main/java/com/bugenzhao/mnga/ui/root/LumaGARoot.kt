@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.flowWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -76,7 +77,7 @@ fun LumaGARoot(
         val navigator = remember {
             Navigator(navController, listOf(initialRoute), navigationActivity)
         }
-        val editor = remember { com.bugenzhao.mnga.ui.editor.EditorController(appScope) }
+        val editor = App.editor
 
         // Opaque theme background under the navigation stack: during the
         // push/pop fade+slide transitions both pages are partially transparent,
@@ -93,11 +94,7 @@ fun LumaGARoot(
                 NavigationHost(navigator, editor)
             }
         }
-        val lifecycleOwner = LocalLifecycleOwner.current
-        val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
-        if (lifecycleState == Lifecycle.State.RESUMED) {
-            GlobalOverlays(navigator, editor)
-        }
+        GlobalOverlays(navigator, editor)
 
         // Pasteboard deep-link handling: when the newest clipboard entry is a
         // navigable NGA/LumaGA link that has not been jumped to yet, navigate
@@ -107,9 +104,19 @@ fun LumaGARoot(
         // system's focus check), so the resume check is deferred until the
         // focus has settled.
         val view = androidx.compose.ui.platform.LocalView.current
+        val lifecycleOwner = LocalLifecycleOwner.current
+        fun checkClipboardOnForeground() {
+            if (view.hasWindowFocus() &&
+                lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED &&
+                App.clipboardGeneration != App.foregroundGeneration
+            ) {
+                App.clipboardGeneration = App.foregroundGeneration
+                maybeNavigateToPasteboardLink(navigator)
+            }
+        }
         DisposableEffect(view) {
             val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-                if (hasFocus) view.post { maybeNavigateToPasteboardLink(navigator) }
+                if (hasFocus) view.post { checkClipboardOnForeground() }
             }
             view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
             onDispose {
@@ -125,7 +132,7 @@ fun LumaGARoot(
                     // before touching the clipboard, otherwise the read is
                     // denied on Android 12+.
                     kotlinx.coroutines.delay(350)
-                    maybeNavigateToPasteboardLink(navigator)
+                    checkClipboardOnForeground()
                 }
         }
     }
@@ -375,16 +382,23 @@ private fun GlobalSheets(
     editor: com.bugenzhao.mnga.ui.editor.EditorController? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Editor sheets, mirroring the global `GlobalSheetsModifier`.
     if (editor != null) {
-        val showPostEditor by editor.postReply.showEditor.collectAsState()
+        val postEditor = remember(editor, lifecycleOwner) {
+            editor.postReply.showEditor.flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.RESUMED)
+        }
+        val showPostEditor by postEditor.collectAsState(initial = false)
         if (showPostEditor) {
             com.bugenzhao.mnga.ui.editor.PostEditorSheet(editor.postReply) {
                 editor.postReply.editorDismissed()
             }
         }
-        val showSmEditor by editor.shortMessage.showEditor.collectAsState()
+        val smEditor = remember(editor, lifecycleOwner) {
+            editor.shortMessage.showEditor.flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.RESUMED)
+        }
+        val showSmEditor by smEditor.collectAsState(initial = false)
         if (showSmEditor) {
             com.bugenzhao.mnga.ui.editor.ShortMessageEditorSheet(editor.shortMessage) {
                 editor.shortMessage.editorDismissed()
@@ -392,7 +406,10 @@ private fun GlobalSheets(
         }
     }
 
-    val isSigning by App.authStorage.isSigning.collectAsState()
+    val signing = remember(lifecycleOwner) {
+        App.authStorage.isSigning.flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.RESUMED)
+    }
+    val isSigning by signing.collectAsState(initial = false)
     if (isSigning) {
         com.bugenzhao.mnga.ui.screens.login.LoginSheet(onDismiss = {
             App.authStorage.setIsSigning(false)
@@ -403,7 +420,10 @@ private fun GlobalSheets(
 /** Presents the current deep-link destination as a fresh stack entry. */
 @Composable
 private fun DeepLinkDestination(navigator: Navigator) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     val navID by App.schemes.navID.collectAsState()
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+    if (lifecycleState != Lifecycle.State.RESUMED) return
     val id = navID ?: return
     LaunchedEffect(id) {
         when (id) {
@@ -425,7 +445,11 @@ private fun DeepLinkDestination(navigator: Navigator) {
 /** In-app browser presentation for external links. */
 @Composable
 private fun InAppBrowserOverlay() {
-    val url by App.openURL.inAppURL.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val urls = remember(lifecycleOwner) {
+        App.openURL.inAppURL.flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.RESUMED)
+    }
+    val url by urls.collectAsState(initial = null)
     val current = url ?: return
     com.bugenzhao.mnga.ui.components.InAppBrowserSheet(uri = current) {
         App.openURL.dismissInApp()
