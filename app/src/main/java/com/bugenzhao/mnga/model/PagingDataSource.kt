@@ -29,6 +29,9 @@ class PagingDataSource<Res : Message, Item : Any>(
     private val finishOnError: Boolean = false,
     private val initialPage: Int = 1,
     private val neverRemove: Boolean = false,
+    private val fetchResponse: suspend (com.bugenzhao.mnga.protos.service.AsyncRequest) -> Result<Res> = {
+        logicCallAsync(it, responseParser())
+    },
 ) {
     data class State<Item : Any>(
         val items: List<Item> = emptyList(),
@@ -61,6 +64,7 @@ class PagingDataSource<Res : Message, Item : Any>(
     // Generation counter; refreshed responses rotate it, in-flight loadMore /
     // reload results that arrive with a stale generation are discarded.
     private var dataFlowId = UUID.randomUUID()
+    private val removedDuringLoad = HashSet<String>()
 
     val hasMore: Boolean get() = loadedPageInternal < totalPagesInternal
     val nextPage: Int? get() = if (hasMore) loadedPageInternal + 1 else null
@@ -195,6 +199,7 @@ class PagingDataSource<Res : Message, Item : Any>(
      * row from its entry-scoped [PagingDataSource].
      */
     fun removeItem(itemId: String): Boolean {
+        if (isLoading) removedDuringLoad.add(itemId)
         val current = _state.value.items
         val index = current.indexOfFirst { id(it) == itemId }
         if (index < 0) return false
@@ -223,6 +228,7 @@ class PagingDataSource<Res : Message, Item : Any>(
             // Re-entry guard.
             if (_state.value.isRefreshing || _state.value.isLoading) return@launch
             dataFlowId = UUID.randomUUID()
+            removedDuringLoad.clear()
             _state.value = _state.value.copy(
                 isLoading = true,
                 isRefreshing = true,
@@ -232,11 +238,11 @@ class PagingDataSource<Res : Message, Item : Any>(
             totalPagesInternal = fromPage
 
             val request = buildRequest(fromPage)
-            val result = logicCallAsync(request, responseParser())
+            val result = fetchResponse(request)
             result.fold(
                 onSuccess = { response ->
                     val (newItems, newTotalPages) = onResponse(response)
-                    replaceItems(newItems, fromPage)
+                    replaceItems(newItems.filterNot { id(it) in removedDuringLoad }, fromPage)
                     _state.value = _state.value.copy(
                         isLoading = false,
                         isRefreshing = false,
@@ -296,16 +302,17 @@ class PagingDataSource<Res : Message, Item : Any>(
 
     private suspend fun loadMoreInternal(background: Boolean, alwaysAnimation: Boolean) {
         if (_state.value.isLoading || loadedPageInternal >= totalPagesInternal) return
+        removedDuringLoad.clear()
         _state.value = _state.value.copy(isLoading = true)
         val page = loadedPageInternal + 1
         val request = buildRequest(page)
         val capturedId = dataFlowId
-        val result = logicCallAsync(request, responseParser())
+        val result = fetchResponse(request)
         result.fold(
             onSuccess = { response ->
                 if (capturedId != dataFlowId) return@fold // stale
                 val (newItems, newTotalPages) = onResponse(response)
-                upsertItems(newItems, page)
+                upsertItems(newItems.filterNot { id(it) in removedDuringLoad }, page)
                 _state.value = _state.value.copy(
                     isLoading = false,
                     latestResponse = response,
@@ -346,15 +353,16 @@ class PagingDataSource<Res : Message, Item : Any>(
         scope.launch {
             if (!(page <= loadedPageInternal || evenIfNotLoaded)) return@launch
             if (_state.value.isLoading) return@launch
+            removedDuringLoad.clear()
             _state.value = _state.value.copy(isLoading = true)
             val request = buildRequest(page)
             val capturedId = dataFlowId
-            val result = logicCallAsync(request, responseParser())
+            val result = fetchResponse(request)
             result.fold(
                 onSuccess = { response ->
                     if (capturedId != dataFlowId) return@fold
                     val (newItems, newTotalPages) = onResponse(response)
-                    upsertItems(newItems, page) // merge, no removal
+                    upsertItems(newItems.filterNot { id(it) in removedDuringLoad }, page) // merge, no removal
                     _state.value = _state.value.copy(
                         isLoading = false,
                         latestResponse = response,

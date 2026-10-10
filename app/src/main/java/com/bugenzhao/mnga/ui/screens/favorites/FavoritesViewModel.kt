@@ -17,6 +17,7 @@ import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyRequest
 import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -114,15 +115,43 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
             savedStateHandle["currentFolderId"] = value
         }
 
-    // One paged topic list per folder, cached so switching folders back and
-    // forth does not refetch. Folders are few, so the cache is small.
+    val topicsModel = FavoriteTopicsModel(viewModelScope)
+
+    fun topicDataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
+        topicsModel.dataSource(folderId)
+}
+
+/** Retains both folder snapshots and pending swipe deletions across recomposition. */
+class FavoriteTopicsModel(
+    private val scope: CoroutineScope,
+    private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
+        logicCallAsync(it, FavoriteTopicListResponse.parser())
+    },
+) {
+    private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
+    val deletingIds: StateFlow<Set<String>> = _deletingIds
+
     private val topicSources =
         mutableMapOf<String, PagingDataSource<FavoriteTopicListResponse, Topic>>()
 
-    fun topicDataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
+    fun beginDelete(topicId: String): Boolean {
+        if (topicId in _deletingIds.value) return false
+        _deletingIds.value = _deletingIds.value + topicId
+        return true
+    }
+
+    fun finishDelete(topicId: String, success: Boolean) {
+        if (success) {
+            // The RPC unfavorites globally, including any other loaded folders.
+            topicSources.values.forEach { it.removeItem(topicId) }
+        }
+        _deletingIds.value = _deletingIds.value - topicId
+    }
+
+    fun dataSource(folderId: String): PagingDataSource<FavoriteTopicListResponse, Topic> =
         topicSources.getOrPut(folderId) {
             PagingDataSource(
-                scope = viewModelScope,
+                scope = scope,
                 responseParser = { FavoriteTopicListResponse.parser() },
                 buildRequest = { page ->
                     AsyncRequest.newBuilder()
@@ -138,6 +167,7 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
                     Pair(response.topicsList, response.pages.toInt().takeIf { it > 0 })
                 },
                 id = { it.id },
+                fetchResponse = fetchTopics,
             )
         }
 }
