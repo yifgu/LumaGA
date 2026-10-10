@@ -113,6 +113,21 @@ pub async fn with_fetch_check<F: futures::Future>(
         .await
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    static MOCK_FETCH: std::cell::RefCell<Box<dyn FnMut(reqwest::Request) -> ServiceResult<String>>>;
+}
+
+#[cfg(test)]
+pub async fn with_mock_fetch<F: futures::Future>(
+    handler: impl FnMut(reqwest::Request) -> ServiceResult<String> + 'static,
+    future: F,
+) -> F::Output {
+    MOCK_FETCH
+        .scope(std::cell::RefCell::new(Box::new(handler)), future)
+        .await
+}
+
 /// Determine the base URL of the request.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum FetchKind {
@@ -186,16 +201,13 @@ impl RetryMode {
     }
 }
 
-async fn do_fetch<AF>(
+fn build_request<AF>(
     api: &str,
     kind: FetchKind,
     mut query: Vec<(&str, &str)>,
     method: Method,
-    // NGA may return detailed error message in the response body when the status code is not OK.
-    // So we should not directly return a `ServiceError::Status`.
-    check_status: bool,
     add_form: AF,
-) -> ServiceResult<Response>
+) -> ServiceResult<(Client, reqwest::Request)>
 where
     AF: FnOnce(RequestBuilder) -> RequestBuilder,
 {
@@ -228,7 +240,23 @@ where
         .header("Referer", url_string); // use any url begins with base url is fine
     let builder = add_form(builder);
 
-    let request = builder.build()?;
+    Ok((client, builder.build()?))
+}
+
+async fn do_fetch<AF>(
+    api: &str,
+    kind: FetchKind,
+    query: Vec<(&str, &str)>,
+    method: Method,
+    // NGA may return detailed error message in the response body when the status code is not OK.
+    // So we should not directly return a `ServiceError::Status`.
+    check_status: bool,
+    add_form: AF,
+) -> ServiceResult<Response>
+where
+    AF: FnOnce(RequestBuilder) -> RequestBuilder,
+{
+    let (client, request) = build_request(api, kind, query, method.clone(), add_form)?;
     #[cfg(test)]
     println!("{} request to url: {}", method, request.url());
     log::info!("{} request to url: {}", method, request.url());
@@ -298,6 +326,14 @@ where
 
         let error = {
             let result = async {
+                #[cfg(test)]
+                if let Ok(response) = MOCK_FETCH.try_with(|handler| {
+                    let (_, request) =
+                        build_request(api, kind, query.clone(), Method::POST, &add_form)?;
+                    handler.borrow_mut()(request)
+                }) {
+                    return RF::parse_response(response?);
+                }
                 let response = do_fetch(api, kind, query, Method::POST, false, &add_form).await?;
                 let status = response.status();
                 let response = response.text_with_charset("gb18030").await?;

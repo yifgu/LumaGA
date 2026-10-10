@@ -1,6 +1,7 @@
 package com.bugenzhao.mnga.ui.screens.favorites
 
 import com.bugenzhao.mnga.protos.datamodel.Topic
+import com.bugenzhao.mnga.protos.service.AsyncRequest
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
 import com.bugenzhao.mnga.protos.service.TopicFavorRequest
 import com.bugenzhao.mnga.protos.service.TopicFavorResponse
@@ -18,6 +19,54 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FavoriteTopicsModelTest {
+    @Test
+    fun `completed last-item deletion stays empty after leaving and reopening favorites`() = runBlocking {
+        val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val entryScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val reopenedScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val topic = Topic.newBuilder().setId("10").build()
+            val folders = mutableMapOf("1" to listOf(topic), "2" to listOf(topic))
+            val deletions = FavoriteTopicDeletions(requestScope) { request ->
+                val delete = request.topicFavor
+                folders[delete.folderId] = folders.getValue(delete.folderId)
+                    .filterNot { it.id == delete.topicId }
+                Result.success(TopicFavorResponse.getDefaultInstance())
+            }
+            var fetches = 0
+            val fetch: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
+                fetches++
+                val topics = folders.getValue(it.favoriteTopicList.folderId)
+                Result.success(
+                    FavoriteTopicListResponse.newBuilder().addAllTopics(topics)
+                        .setPages(if (topics.isEmpty()) 0 else 1).build()
+                )
+            }
+            val original = FavoriteTopicsModel(entryScope, deletions, fetch)
+            val source = original.dataSource("1")
+            source.initialLoad()!!.join()
+            assertEquals(listOf(topic), source.items)
+
+            deletions.delete("1", "10")
+            assertTrue(deletions.pending.value.isEmpty())
+            assertTrue(source.items.isEmpty())
+            entryScope.cancel()
+
+            val reopened = FavoriteTopicsModel(reopenedScope, deletions, fetch)
+            val returned = reopened.dataSource("1")
+            returned.initialLoad()!!.join()
+            assertEquals(2, fetches)
+            assertTrue(returned.items.isEmpty())
+            assertFalse(returned.notLoaded)
+            assertFalse(returned.hasMore)
+            assertEquals(listOf(topic), folders.getValue("2"))
+        } finally {
+            entryScope.cancel()
+            reopenedScope.cancel()
+            requestScope.cancel()
+        }
+    }
+
     @Test
     fun `pending last-item deletion stays hidden when returning to a folder`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)

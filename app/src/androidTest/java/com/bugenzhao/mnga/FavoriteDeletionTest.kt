@@ -2,7 +2,14 @@ package com.bugenzhao.mnga
 
 import android.os.SystemClock
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -30,12 +37,42 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class FavoriteDeletionTest {
+    @Test
+    fun lastFavoriteStaysDeletedAfterReturningToMainAndReopeningFolder() =
+        withFavorites(navigation = true) { scenario, device, fixture ->
+            val original = fixture.model
+            swipeTopic(device)
+            await(scenario) { fixture.requests.size == 1 }
+            scenario.onActivity {
+                fixture.responses.trySend(Result.success(TopicFavorResponse.getDefaultInstance()))
+            }
+            await(scenario) {
+                original.dataSource("7").items.isEmpty() && fixture.deletions.pending.value.isEmpty()
+            }
+            assertTrue(device.wait(Until.hasObject(By.text(noFavorites())), 5_000))
+
+            device.pressBack()
+            assertTrue(device.wait(Until.hasObject(By.text(OPEN_FAVORITES)), 5_000))
+            device.findObject(By.text(OPEN_FAVORITES)).click()
+            assertTrue(device.wait(Until.hasObject(By.text(noFavorites())), 5_000))
+            await(scenario) { fixture.fetches == 2 && !fixture.model.dataSource("7").notLoaded }
+            scenario.onActivity {
+                assertNotSame(original, fixture.model)
+                assertTrue(fixture.model.dataSource("7").items.isEmpty())
+                assertTrue(fixture.topics.isEmpty())
+                assertEquals(1, fixture.requests.size)
+            }
+            assertFalse(device.hasObject(By.text(SUBJECT)))
+        }
+
     @Test
     fun lastFavoriteCanBeSwipedAndEmptyFolderCanBeRefreshed() = withFavorites { scenario, device, fixture ->
         swipeTopic(device)
@@ -96,19 +133,26 @@ class FavoriteDeletionTest {
         val requests = mutableListOf<AsyncRequest>()
         val responses = Channel<Result<TopicFavorResponse>>(Channel.UNLIMITED)
         var fetches = 0
-        val model = FavoriteTopicsModel(
-            scope,
-            FavoriteTopicDeletions(scope) {
-                requests.add(it)
-                responses.receive()
-            },
-        ) {
+        var topics = emptyList<Topic>()
+        val deletions = FavoriteTopicDeletions(scope) { request ->
+            requests.add(request)
+            responses.receive().onSuccess {
+                topics = topics.filterNot { it.id == request.topicFavor.topicId }
+            }
+        }
+        var model = createModel(scope)
+
+        fun createModel(scope: CoroutineScope) = FavoriteTopicsModel(scope, deletions) {
             fetches++
-            Result.success(FavoriteTopicListResponse.getDefaultInstance())
+            Result.success(
+                FavoriteTopicListResponse.newBuilder().addAllTopics(topics)
+                    .setPages(if (topics.isEmpty()) 0 else 1).build()
+            )
         }
     }
 
     private fun withFavorites(
+        navigation: Boolean = false,
         test: (ActivityScenario<MainActivity>, UiDevice, Fixture) -> Unit,
     ) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -126,19 +170,49 @@ class FavoriteDeletionTest {
                         totalPages = 1,
                         lastRefreshTime = Date(),
                     )
+                    if (navigation) fixture.topics = fixture.model.dataSource("7").items
                     activity.setContent {
                         val controller = rememberNavController()
                         val navigator = remember(controller) { Navigator(controller) }
                         LumaGATheme {
-                            FavoriteTopicList(
-                                FavoriteTopicFolder.newBuilder().setId("7").build(),
-                                navigator,
-                                fixture.model,
-                            )
+                            if (navigation) {
+                                NavHost(
+                                    controller,
+                                    startDestination = "main",
+                                    modifier = Modifier.systemBarsPadding(),
+                                ) {
+                                    composable("main") {
+                                        TextButton(onClick = { controller.navigate("favorites") }) {
+                                            Text(OPEN_FAVORITES)
+                                        }
+                                    }
+                                    composable("favorites") { entry ->
+                                        val entryScope = rememberCoroutineScope()
+                                        val model = remember(entry) {
+                                            fixture.createModel(entryScope).also { fixture.model = it }
+                                        }
+                                        FavoriteTopicList(
+                                            FavoriteTopicFolder.newBuilder().setId("7").build(),
+                                            navigator,
+                                            model,
+                                        )
+                                    }
+                                }
+                            } else {
+                                FavoriteTopicList(
+                                    FavoriteTopicFolder.newBuilder().setId("7").build(),
+                                    navigator,
+                                    fixture.model,
+                                )
+                            }
                         }
                     }
                 }
                 val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+                if (navigation) {
+                    assertTrue(device.wait(Until.hasObject(By.text(OPEN_FAVORITES)), 5_000))
+                    device.findObject(By.text(OPEN_FAVORITES)).click()
+                }
                 assertTrue(device.wait(Until.hasObject(By.text(SUBJECT)), 5_000))
                 test(scenario, device, fixture)
             }
@@ -172,5 +246,6 @@ class FavoriteDeletionTest {
 
     companion object {
         private const val SUBJECT = "Favorite deletion regression topic"
+        private const val OPEN_FAVORITES = "Open favorite topics from main page"
     }
 }
