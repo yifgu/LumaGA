@@ -21,8 +21,9 @@ import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
 import com.bugenzhao.mnga.protos.datamodel.Subject
 import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.AsyncRequest
+import com.bugenzhao.mnga.protos.service.FavoriteFolderListResponse
+import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
-import com.bugenzhao.mnga.protos.service.TopicFavorRequest
 import com.bugenzhao.mnga.protos.service.TopicFavorResponse
 import com.bugenzhao.mnga.ui.nav.Navigator
 import com.bugenzhao.mnga.ui.screens.favorites.FavoriteTopicDeletions
@@ -78,10 +79,9 @@ class FavoriteDeletionTest {
         swipeTopic(device)
         await(scenario) { fixture.requests.size == 1 }
         scenario.onActivity {
-            val request = fixture.requests.single().topicFavor
+            val request = fixture.requests.single().favoriteFolderModify
             assertEquals("7", request.folderId)
-            assertEquals("10", request.topicId)
-            assertEquals(TopicFavorRequest.Operation.DELETE, request.operation)
+            assertTrue(request.delete)
             fixture.responses.trySend(Result.success(TopicFavorResponse.getDefaultInstance()))
         }
         await(scenario) {
@@ -134,12 +134,29 @@ class FavoriteDeletionTest {
         val responses = Channel<Result<TopicFavorResponse>>(Channel.UNLIMITED)
         var fetches = 0
         var topics = emptyList<Topic>()
-        val deletions = FavoriteTopicDeletions(scope) { request ->
-            requests.add(request)
-            responses.receive().onSuccess {
-                topics = topics.filterNot { it.id == request.topicFavor.topicId }
-            }
-        }
+        val deletions = FavoriteTopicDeletions(
+            scope,
+            fetchTopics = {
+                Result.success(
+                    FavoriteTopicListResponse.newBuilder().addAllTopics(topics).setPages(1).build()
+                )
+            },
+            fetchFolders = {
+                Result.success(
+                    FavoriteFolderListResponse.newBuilder().addFolders(
+                        FavoriteTopicFolder.newBuilder().setId("7").setTopicCount(topics.size)
+                    ).build()
+                )
+            },
+            deleteFolder = { request ->
+                requests.add(request)
+                responses.receive().map {
+                    topics = emptyList()
+                    FavoriteFolderModifyResponse.getDefaultInstance()
+                }
+            },
+            deleteTopic = { error("The last favorite must use whole-folder deletion") },
+        )
         var model = createModel(scope)
 
         fun createModel(scope: CoroutineScope) = FavoriteTopicsModel(scope, deletions) {
@@ -170,7 +187,7 @@ class FavoriteDeletionTest {
                         totalPages = 1,
                         lastRefreshTime = Date(),
                     )
-                    if (navigation) fixture.topics = fixture.model.dataSource("7").items
+                    fixture.topics = fixture.model.dataSource("7").items
                     activity.setContent {
                         val controller = rememberNavController()
                         val navigator = remember(controller) { Navigator(controller) }

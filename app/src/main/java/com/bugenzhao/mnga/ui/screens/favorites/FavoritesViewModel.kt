@@ -33,6 +33,8 @@ import kotlinx.coroutines.sync.withLock
 
 /** Favorite folders of the logged-in user (SS15). */
 class FavoriteFoldersModel(
+    scope: CoroutineScope? = null,
+    deletions: FavoriteTopicDeletions = FavoriteTopicDeletions.shared,
     private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
         logicCallAsync(
             AsyncRequest.newBuilder()
@@ -52,15 +54,29 @@ class FavoriteFoldersModel(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
     private val loadMutex = Mutex()
+    private val removedDuringLoad = mutableSetOf<String>()
+
+    init {
+        scope?.launch(start = CoroutineStart.UNDISPATCHED) {
+            deletions.deletedFolders.collect { folderId ->
+                if (_state.value.isLoading) removedDuringLoad.add(folderId)
+                _state.value = _state.value.copy(
+                    folders = _state.value.folders.filterNot { it.id == folderId },
+                )
+                launch { load(force = true) }
+            }
+        }
+    }
 
     suspend fun load(force: Boolean = false) = loadMutex.withLock {
         if (_state.value.hasLoaded && !force) return@withLock
+        removedDuringLoad.clear()
         _state.value = _state.value.copy(isLoading = true, latestError = null)
         try {
             fetchFolders().fold(
                 onSuccess = { response ->
                     _state.value = _state.value.copy(
-                        folders = response.foldersList,
+                        folders = response.foldersList.filterNot { it.id in removedDuringLoad },
                         hasLoaded = true,
                     )
                 },
@@ -114,7 +130,7 @@ class FavoriteFoldersModel(
  */
 class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
-    val foldersModel = FavoriteFoldersModel()
+    val foldersModel = FavoriteFoldersModel(viewModelScope)
 
     /** The folder the user last selected; kept across pop-backs and process death. */
     var currentFolderId: String?
@@ -129,6 +145,20 @@ class FavoritesViewModel(private val savedStateHandle: SavedStateHandle) : ViewM
 /** Coordinates app-scoped delete requests, including when a favorites entry is reopened. */
 class FavoriteTopicDeletions(
     private val scope: CoroutineScope = appScope,
+    private val fetchTopics: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
+        logicCallAsync(it, FavoriteTopicListResponse.parser())
+    },
+    private val fetchFolders: suspend () -> Result<FavoriteFolderListResponse> = {
+        logicCallAsync(
+            AsyncRequest.newBuilder()
+                .setFavoriteFolderList(FavoriteFolderListRequest.getDefaultInstance())
+                .build(),
+            FavoriteFolderListResponse.parser(),
+        )
+    },
+    private val deleteFolder: suspend (AsyncRequest) -> Result<FavoriteFolderModifyResponse> = {
+        logicCallAsync(it, FavoriteFolderModifyResponse.parser())
+    },
     private val deleteTopic: suspend (AsyncRequest) -> Result<TopicFavorResponse> = {
         logicCallAsync(it, TopicFavorResponse.parser())
     },
@@ -139,31 +169,70 @@ class FavoriteTopicDeletions(
     val pending: StateFlow<Set<Item>> = _pending
     private val _confirmed = MutableSharedFlow<Item>()
     val confirmed: SharedFlow<Item> = _confirmed
+    private val _deletedFolders = MutableSharedFlow<String>()
+    val deletedFolders: SharedFlow<String> = _deletedFolders
     private val deleteMutex = Mutex()
 
-    fun delete(folderId: String, topicId: String, onFailure: (Throwable) -> Unit = {}): Boolean {
+    fun delete(
+        folderId: String,
+        topicId: String,
+        deleteFolderIfLast: Boolean = false,
+        onFailure: (Throwable) -> Unit = {},
+    ): Boolean {
         val item = Item(folderId, topicId)
         if (item in _pending.value) return false
         _pending.value = _pending.value + item
         scope.launch {
             try {
-                val result = deleteMutex.withLock {
-                    deleteTopic(
-                        AsyncRequest.newBuilder()
-                            .setTopicFavor(
-                                TopicFavorRequest.newBuilder()
-                                    .setFolderId(folderId)
-                                    .setTopicId(topicId)
-                                    .setOperation(TopicFavorRequest.Operation.DELETE)
-                                    .build()
-                            )
-                            .build()
-                    )
+                deleteMutex.withLock {
+                    // Check server count too: topic parsing can omit invalid rows.
+                    val lastTopic = if (deleteFolderIfLast) {
+                        val response = fetchTopics(
+                            AsyncRequest.newBuilder()
+                                .setFavoriteTopicList(
+                                    FavoriteTopicListRequest.newBuilder()
+                                        .setFolderId(folderId)
+                                        .setPage(1)
+                                        .build()
+                                )
+                                .build()
+                        ).getOrThrow()
+                        response.pages == 1 &&
+                            response.topicsList.singleOrNull()?.id == topicId &&
+                            fetchFolders().getOrThrow().foldersList.any {
+                                it.id == folderId && it.topicCount == 1
+                            }
+                    } else {
+                        false
+                    }
+                    if (lastTopic) {
+                        deleteFolder(
+                            AsyncRequest.newBuilder()
+                                .setFavoriteFolderModify(
+                                    FavoriteFolderModifyRequest.newBuilder()
+                                        .setFolderId(folderId)
+                                        .setDelete(true)
+                                        .build()
+                                )
+                                .build()
+                        ).getOrThrow()
+                        _confirmed.emit(item)
+                        _deletedFolders.emit(folderId)
+                    } else {
+                        deleteTopic(
+                            AsyncRequest.newBuilder()
+                                .setTopicFavor(
+                                    TopicFavorRequest.newBuilder()
+                                        .setFolderId(folderId)
+                                        .setTopicId(topicId)
+                                        .setOperation(TopicFavorRequest.Operation.DELETE)
+                                        .build()
+                                )
+                                .build()
+                        ).getOrThrow()
+                        _confirmed.emit(item)
+                    }
                 }
-                result.fold(
-                    onSuccess = { _confirmed.emit(item) },
-                    onFailure = onFailure,
-                )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {

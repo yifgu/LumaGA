@@ -1,7 +1,10 @@
 package com.bugenzhao.mnga.ui.screens.favorites
 
+import com.bugenzhao.mnga.protos.datamodel.FavoriteTopicFolder
 import com.bugenzhao.mnga.protos.datamodel.Topic
 import com.bugenzhao.mnga.protos.service.AsyncRequest
+import com.bugenzhao.mnga.protos.service.FavoriteFolderListResponse
+import com.bugenzhao.mnga.protos.service.FavoriteFolderModifyResponse
 import com.bugenzhao.mnga.protos.service.FavoriteTopicListResponse
 import com.bugenzhao.mnga.protos.service.TopicFavorRequest
 import com.bugenzhao.mnga.protos.service.TopicFavorResponse
@@ -19,6 +22,268 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FavoriteTopicsModelTest {
+    @Test
+    fun `last favorite deletes its entire folder before the broken item delete can run`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val topic = Topic.newBuilder().setId("10").build()
+            val folders = mutableMapOf("1" to listOf(topic), "2" to listOf(topic))
+            val fetch: suspend (AsyncRequest) -> Result<FavoriteTopicListResponse> = {
+                assertEquals(1, it.favoriteTopicList.page)
+                Result.success(
+                    FavoriteTopicListResponse.newBuilder()
+                        .addAllTopics(folders[it.favoriteTopicList.folderId].orEmpty())
+                        .setPages(1).build()
+                )
+            }
+            var folderDeletes = 0
+            val deletions = FavoriteTopicDeletions(
+                scope,
+                fetchTopics = fetch,
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder().addFolders(
+                            FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(1)
+                        ).build()
+                    )
+                },
+                deleteFolder = {
+                    assertEquals("1", it.favoriteFolderModify.folderId)
+                    assertTrue(it.favoriteFolderModify.delete)
+                    folders.remove(it.favoriteFolderModify.folderId)
+                    folderDeletes++
+                    Result.success(FavoriteFolderModifyResponse.getDefaultInstance())
+                },
+                deleteTopic = { error("The last-item API must not be used") },
+            )
+            val model = FavoriteTopicsModel(scope, deletions, fetch)
+            model.dataSource("1").initialLoad()!!.join()
+            model.dataSource("2").initialLoad()!!.join()
+
+            deletions.delete("1", "10", deleteFolderIfLast = true)
+
+            assertEquals(1, folderDeletes)
+            assertFalse(folders.containsKey("1"))
+            assertTrue(model.dataSource("1").items.isEmpty())
+            assertEquals(listOf(topic), model.dataSource("2").items)
+            assertTrue(deletions.pending.value.isEmpty())
+            val reopened = FavoriteTopicsModel(scope, deletions, fetch)
+            reopened.dataSource("1").initialLoad()!!.join()
+            assertTrue(reopened.dataSource("1").items.isEmpty())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `fresh server contents prevent deletion of folders with other or unloaded topics`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val topic = Topic.newBuilder().setId("10").build()
+            val other = Topic.newBuilder().setId("20").build()
+            for ((topics, pages) in listOf(
+                listOf(topic) to 2,
+                listOf(topic, other) to 1,
+                listOf(other) to 1,
+                emptyList<Topic>() to 0,
+            )) {
+                var itemDeletes = 0
+                val deletions = FavoriteTopicDeletions(
+                    scope,
+                    fetchTopics = {
+                        Result.success(
+                            FavoriteTopicListResponse.newBuilder()
+                                .addAllTopics(topics).setPages(pages).build()
+                        )
+                    },
+                    deleteFolder = { error("Other favorites must not be deleted") },
+                    deleteTopic = {
+                        assertEquals("1", it.topicFavor.folderId)
+                        assertEquals("10", it.topicFavor.topicId)
+                        itemDeletes++
+                        Result.success(TopicFavorResponse.getDefaultInstance())
+                    },
+                )
+                val model = FavoriteTopicsModel(scope, deletions)
+                model.dataSource("1").restoreItems(listOf(topic), 1, 1, Date())
+
+                deletions.delete("1", "10", deleteFolderIfLast = true)
+
+                assertEquals(1, itemDeletes)
+                assertTrue(model.dataSource("1").items.isEmpty())
+            }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a single parsed topic does not permit deleting a folder with other or uncounted favorites`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            for (count in listOf(0, 2, 35)) {
+                var itemDeletes = 0
+                val deletions = FavoriteTopicDeletions(
+                    scope,
+                    fetchTopics = {
+                        Result.success(
+                            FavoriteTopicListResponse.newBuilder()
+                                .addTopics(Topic.newBuilder().setId("10")).setPages(1).build()
+                        )
+                    },
+                    fetchFolders = {
+                        Result.success(
+                            FavoriteFolderListResponse.newBuilder().addFolders(
+                                FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(count)
+                            ).build()
+                        )
+                    },
+                    deleteFolder = { error("Server count does not confirm a single favorite") },
+                    deleteTopic = {
+                        itemDeletes++
+                        Result.success(TopicFavorResponse.getDefaultInstance())
+                    },
+                )
+
+                deletions.delete("1", "10", deleteFolderIfLast = true)
+
+                assertEquals(1, itemDeletes)
+                assertTrue(deletions.pending.value.isEmpty())
+            }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `failed last-folder deletion restores the row and retry deletes the folder`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val topic = Topic.newBuilder().setId("10").build()
+            var attempts = 0
+            val deletions = FavoriteTopicDeletions(
+                scope,
+                fetchTopics = {
+                    Result.success(
+                        FavoriteTopicListResponse.newBuilder().addTopics(topic).setPages(1).build()
+                    )
+                },
+                fetchFolders = {
+                    Result.success(
+                        FavoriteFolderListResponse.newBuilder().addFolders(
+                            FavoriteTopicFolder.newBuilder().setId("1").setTopicCount(1)
+                        ).build()
+                    )
+                },
+                deleteFolder = {
+                    if (attempts++ == 0) Result.failure(IllegalStateException("folder delete failed"))
+                    else Result.success(FavoriteFolderModifyResponse.getDefaultInstance())
+                },
+                deleteTopic = { error("Must retry the whole-folder deletion") },
+            )
+            val model = FavoriteTopicsModel(scope, deletions)
+            val source = model.dataSource("1")
+            source.restoreItems(listOf(topic), 1, 1, Date())
+            var error: Throwable? = null
+
+            deletions.delete("1", "10", deleteFolderIfLast = true) { error = it }
+
+            assertEquals("folder delete failed", error?.message)
+            assertTrue(deletions.pending.value.isEmpty())
+            assertEquals(listOf(topic), source.items)
+            deletions.delete("1", "10", deleteFolderIfLast = true)
+            assertEquals(2, attempts)
+            assertTrue(source.items.isEmpty())
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `failed verification performs no destructive requests and allows retry`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val deletions = FavoriteTopicDeletions(
+                scope,
+                fetchTopics = { Result.failure(IllegalStateException("verification failed")) },
+                deleteFolder = { error("Unverified folder must not be deleted") },
+                deleteTopic = { error("Unverified deletion must be retriable") },
+            )
+            var failures = 0
+            repeat(2) {
+                assertTrue(deletions.delete("1", "10", deleteFolderIfLast = true) { failures++ })
+                assertTrue(deletions.pending.value.isEmpty())
+            }
+            assertEquals(2, failures)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `queued swipes verify remaining contents after previous deletion succeeds or fails`() = runBlocking {
+        for (firstSucceeds in listOf(true, false)) {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+            try {
+                val first = Topic.newBuilder().setId("10").build()
+                val last = Topic.newBuilder().setId("20").build()
+                var topics = listOf(first, last)
+                val finish = CompletableDeferred<Unit>()
+                var folderDeletes = 0
+                var itemDeletes = 0
+                val deletions = FavoriteTopicDeletions(
+                    scope,
+                    fetchTopics = {
+                        Result.success(
+                            FavoriteTopicListResponse.newBuilder()
+                                .addAllTopics(topics).setPages(1).build()
+                        )
+                    },
+                    fetchFolders = {
+                        Result.success(
+                            FavoriteFolderListResponse.newBuilder().addFolders(
+                                FavoriteTopicFolder.newBuilder().setId("1")
+                                    .setTopicCount(topics.size)
+                            ).build()
+                        )
+                    },
+                    deleteFolder = {
+                        folderDeletes++
+                        topics = emptyList()
+                        Result.success(FavoriteFolderModifyResponse.getDefaultInstance())
+                    },
+                    deleteTopic = {
+                        itemDeletes++
+                        if (it.topicFavor.topicId == first.id) {
+                            finish.await()
+                            if (firstSucceeds) {
+                                topics = topics.filterNot { topic -> topic.id == first.id }
+                                Result.success(TopicFavorResponse.getDefaultInstance())
+                            } else {
+                                Result.failure(IllegalStateException("first delete failed"))
+                            }
+                        } else {
+                            topics = topics.filterNot { topic -> topic.id == last.id }
+                            Result.success(TopicFavorResponse.getDefaultInstance())
+                        }
+                    },
+                )
+
+                deletions.delete("1", first.id, deleteFolderIfLast = true)
+                deletions.delete("1", last.id, deleteFolderIfLast = true)
+                assertEquals(2, deletions.pending.value.size)
+                finish.complete(Unit)
+
+                assertTrue(deletions.pending.value.isEmpty())
+                assertEquals(if (firstSucceeds) 1 else 0, folderDeletes)
+                assertEquals(if (firstSucceeds) 1 else 2, itemDeletes)
+                assertEquals(if (firstSucceeds) emptyList() else listOf(first), topics)
+            } finally {
+                scope.cancel()
+            }
+        }
+    }
+
     @Test
     fun `completed last-item deletion stays empty after leaving and reopening favorites`() = runBlocking {
         val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
