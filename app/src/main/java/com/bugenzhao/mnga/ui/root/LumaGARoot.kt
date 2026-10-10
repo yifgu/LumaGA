@@ -53,7 +53,6 @@ import com.bugenzhao.mnga.ui.screens.topiclist.TopicListScreen
 import com.bugenzhao.mnga.ui.screens.user.UserProfileScreen
 import com.bugenzhao.mnga.ui.screens.user.BlockedUsersScreen
 import com.bugenzhao.mnga.ui.theme.LumaGATheme
-import com.bugenzhao.mnga.model.appScope
 import kotlinx.coroutines.flow.filter
 
 /** Root composable: theme, navigation stack and global overlays. */
@@ -451,6 +450,7 @@ private fun InAppBrowserOverlay() {
     }
     val url by urls.collectAsState(initial = null)
     val current = url ?: return
+    BackHandler { App.openURL.dismissInApp() }
     com.bugenzhao.mnga.ui.components.InAppBrowserSheet(uri = current) {
         App.openURL.dismissInApp()
     }
