@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import coil.Coil
 import com.bugenzhao.mnga.App
 import com.bugenzhao.mnga.logicCallAsync
+import com.bugenzhao.mnga.model.appScope
 import com.bugenzhao.mnga.protos.datamodel.CacheOperation
 import com.bugenzhao.mnga.protos.datamodel.CacheType
 import com.bugenzhao.mnga.protos.service.AsyncRequest
@@ -53,6 +54,7 @@ import com.bugenzhao.mnga.util.Haptics
 import com.bugenzhao.mnga.util.L
 import com.bugenzhao.mnga.util.fmtL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -86,7 +88,10 @@ fun CacheScreen(navigator: Navigator? = null) {
     var pendingClear by remember { mutableStateOf<PendingClear?>(null) }
 
     fun manipulateCache(type: CacheType, operation: CacheOperation) {
-        scope.launch {
+        val clearsNotifications = operation == CacheOperation.CLEAR &&
+            (type == CacheType.NOTIFICATION || type == CacheType.ALL)
+        val requestScope = if (clearsNotifications) appScope else scope
+        requestScope.launch {
             val request = AsyncRequest.newBuilder()
                 .setCache(
                     CacheRequest.newBuilder()
@@ -96,10 +101,9 @@ fun CacheScreen(navigator: Navigator? = null) {
                 )
                 .build()
             logicCallAsync(request, CacheResponse.parser()).onSuccess { response ->
+                if (clearsNotifications) App.notis.clearReadOverrides().join()
+                if (!scope.isActive) return@onSuccess
                 if (operation == CacheOperation.CLEAR) {
-                    if (type == CacheType.NOTIFICATION || type == CacheType.ALL) {
-                        App.notis.clearReadOverrides()
-                    }
                     Haptics.play(view, Haptics.NotificationType.SUCCESS)
                     manipulateCache(type, CacheOperation.CHECK)
                 } else {
