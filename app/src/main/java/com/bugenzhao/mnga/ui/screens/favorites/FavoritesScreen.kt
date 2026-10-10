@@ -118,6 +118,7 @@ fun FavoritesScreen(navigator: Navigator, initialFolderId: String? = null) {
             }
         } else if (currentFolder != null && folders.none { it.id == currentFolder?.id }) {
             currentFolder = null
+            favoritesVM.currentFolderId = null
         }
     }
 
@@ -447,7 +448,7 @@ internal fun FavoriteTopicList(
     }
 
     fun deleteFavorite(topicId: String) {
-        topicsModel.deletions.delete(folder.id, topicId) { error ->
+        topicsModel.deletions.delete(folder.id, topicId, deleteFolderIfLast = true) { error ->
             ToastModel.showAuto(
                 ToastModel.Message.Error(
                     L.str(context, "Unfavorite failed") +
