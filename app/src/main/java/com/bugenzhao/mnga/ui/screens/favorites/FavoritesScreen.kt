@@ -441,6 +441,13 @@ private fun FavoriteTopicList(folder: FavoriteTopicFolder, navigator: Navigator)
     LaunchedEffect(folder.id) {
         if (dataSource.notLoaded) dataSource.initialLoad()
     }
+    LaunchedEffect(dataSource, state.items.isEmpty(), state.isLoading, state.latestError) {
+        if (state.items.isEmpty() && !state.isLoading && state.latestError == null &&
+            !dataSource.notLoaded && dataSource.hasMore
+        ) {
+            dataSource.loadMore()
+        }
+    }
 
     val listState = rememberLazyListState()
     // Pending rows stay hidden even if the composition is disposed and recreated.
