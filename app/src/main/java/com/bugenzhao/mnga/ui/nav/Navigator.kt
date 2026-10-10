@@ -1,6 +1,11 @@
 package com.bugenzhao.mnga.ui.nav
 
+import android.app.Activity
+import android.content.Intent
+import android.os.Build
 import androidx.navigation.NavHostController
+import com.bugenzhao.mnga.MainActivity
+import com.bugenzhao.mnga.ScreenActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,10 +21,16 @@ import kotlinx.coroutines.launch
  * menus) and system back presses stay in sync. NavHost keeps every entry's
  * composition and saveable state alive while it is off-screen, so popping back
  * to a screen resumes it instead of rebuilding and refetching.
+ *
+ * On Android 14+, production uses a single destination per Activity instead.
+ * Android owns that task's back stack and predictive animation; [stack] then
+ * describes only this Activity's destination. A null [activity] keeps NavHost
+ * navigation for tests and standalone composables.
  */
 class Navigator(
     val navController: NavHostController,
     initial: List<Route> = emptyList(),
+    private val activity: Activity? = null,
 ) {
 
     /** How the top-most route most recently entered the stack; screens use it
@@ -38,15 +49,30 @@ class Navigator(
 
     fun push(route: Route) {
         lastOp = Op.PUSH
+        if (usesActivityNavigation) {
+            activity!!.startActivity(ScreenActivity.intent(activity, route))
+            return
+        }
         navController.navigate(RouteCodec.encode(route))
     }
 
     fun pop() {
         lastOp = Op.POP
+        if (usesActivityNavigation) {
+            if (activity is ScreenActivity) activity.finish()
+            return
+        }
         navController.popBackStack()
     }
 
     fun popToRoot() {
+        if (usesActivityNavigation) {
+            activity!!.startActivity(
+                Intent(activity, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+            return
+        }
         navController.popBackStack(RouteCodec.ROUTE_FORUM_LIST, inclusive = false)
     }
 
@@ -56,12 +82,20 @@ class Navigator(
     }
 
     fun replace(route: Route) {
+        if (usesActivityNavigation) {
+            push(route)
+            if (activity is ScreenActivity) activity.finish()
+            return
+        }
         navController.navigate(RouteCodec.encode(route)) {
             popUpTo(navController.graph.id) { inclusive = true }
         }
     }
 
     fun contains(predicate: (Route) -> Boolean): Boolean = _stack.value.any(predicate)
+
+    private val usesActivityNavigation: Boolean
+        get() = activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
 
     /**
      * Keeps [stack] (and [lastOp]) in sync with the NavController back stack.

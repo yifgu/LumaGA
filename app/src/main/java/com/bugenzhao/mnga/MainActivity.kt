@@ -15,12 +15,19 @@ import com.bugenzhao.mnga.model.SchemesModel
 import com.bugenzhao.mnga.storage.PreferencesStorage
 import com.bugenzhao.mnga.storage.ColorSchemeMode
 import com.bugenzhao.mnga.ui.root.LumaGARoot
+import com.bugenzhao.mnga.ui.nav.Route
 import com.bugenzhao.mnga.ui.theme.isDarkTheme
 
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
+
+    protected open fun initialRoute(): Route? = Route.ForumList
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val route = initialRoute() ?: run {
+            finish()
+            return
+        }
         enableEdgeToEdge()
         handleIntent(intent)
         setContent {
@@ -47,12 +54,17 @@ class MainActivity : ComponentActivity() {
                     if (portrait) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
-            LumaGARoot(onNewIntent = { handleIntent(it) })
+            LumaGARoot(
+                onNewIntent = { handleIntent(it) },
+                initialRoute = route,
+                navigationActivity = this,
+            )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 

@@ -34,6 +34,8 @@ NGA（bbs.nga.cn）论坛的 Android 第三方客户端，[MNGA](https://github.
   - `app-release.apk` —— 正式版（签名安装包，推荐）
   - `app-debug.apk` —— 调试版（每次 push 由 CI 构建）
 - 安装后打开 App，在首页登录 NGA 账号即可浏览版块、帖子与短消息。
+- Android 14+ 采用与 [LibChecker](https://github.com/LibChecker/LibChecker) 相同的系统跨 Activity 预测性返回：每个页面由内部 Activity 承载，取消手势保留当前页，完成手势返回上一页，不依赖应用收到手势进度。此前单 Activity 的 Navigation Compose 在所报告的 HONOR 设备上收不到进度。Android 13 及以下保留原有页面导航；主页在 Android 13+ 由系统处理返回，Android 12 及以下保留双击返回退出。Android 13–14 需在开发者选项中开启预测性返回动画。
+- 请在真机测试「主页 → 个人中心 → 设置 → 关于」的左右边缘手势取消/完成、工具栏及按钮返回、弹窗关闭，以及返回帖子后的滚动位置；仅向 AndroidX 注入返回事件的测试不能验证系统预览动画。
 - 支持 `mnga://` 深链：例如 `mnga://forum/f/722` 可直达对应版块；App 在前台时也会自动识别剪贴板中的链接并跳转。
 
 ## 目录结构
