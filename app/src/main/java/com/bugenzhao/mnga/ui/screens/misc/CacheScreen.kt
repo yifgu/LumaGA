@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.Coil
+import com.bugenzhao.mnga.App
 import com.bugenzhao.mnga.logicCallAsync
 import com.bugenzhao.mnga.protos.datamodel.CacheOperation
 import com.bugenzhao.mnga.protos.datamodel.CacheType
@@ -96,6 +97,9 @@ fun CacheScreen(navigator: Navigator? = null) {
                 .build()
             logicCallAsync(request, CacheResponse.parser()).onSuccess { response ->
                 if (operation == CacheOperation.CLEAR) {
+                    if (type == CacheType.NOTIFICATION || type == CacheType.ALL) {
+                        App.notis.clearReadOverrides()
+                    }
                     Haptics.play(view, Haptics.NotificationType.SUCCESS)
                     manipulateCache(type, CacheOperation.CHECK)
                 } else {

@@ -26,12 +26,30 @@ class NotificationModelTest {
             assertEquals(2, model.unreadCountAnimated.value)
 
             model.markRead(listOf("reply"), read = true).join()
+            assertEquals(1, model.unreadCount)
             yield()
 
             assertTrue(model.state.value.items.first().read)
             assertEquals(1, model.unreadCount)
             assertEquals(1, model.unreadCountAnimated.value)
             assertEquals(listOf(listOf("reply") to true), requests)
+        }
+    }
+
+    @Test
+    fun `clearing notification cache allows fetched read flags to take effect again`() = runBlocking {
+        withModel { model ->
+            val reply = unread("reply")
+            restore(model, reply)
+            model.markRead(listOf("reply"), read = true).join()
+            assertEquals(0, model.unreadCount)
+
+            model.clearReadOverrides().join()
+            restore(model, reply)
+            yield()
+
+            assertFalse(model.items.single().read)
+            assertEquals(1, model.unreadCountAnimated.value)
         }
     }
 

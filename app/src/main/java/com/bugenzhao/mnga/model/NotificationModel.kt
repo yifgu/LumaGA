@@ -80,7 +80,11 @@ class NotificationModel(
         }.stateIn(scope, SharingStarted.Eagerly, dataSource.state.value)
 
     val items: List<Notification> get() = state.value.items
-    val unreadCount: Int get() = items.count { !it.read }
+    val unreadCount: Int
+        get() {
+            val overrides = readOverrides.value
+            return dataSource.items.count { !(overrides[it.id] ?: it.read) }
+        }
 
     private val _unreadCountAnimated = MutableStateFlow(0)
     val unreadCountAnimated: StateFlow<Int> = _unreadCountAnimated
@@ -117,6 +121,13 @@ class NotificationModel(
                 }
                 readOverrides.value = readOverrides.value + ids.associateWith { read }
                 onSuccess()
+            }
+        }
+
+    fun clearReadOverrides(): Job =
+        scope.launch {
+            markMutex.withLock {
+                readOverrides.value = emptyMap()
             }
         }
 
