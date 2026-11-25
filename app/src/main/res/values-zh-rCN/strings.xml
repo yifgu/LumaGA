@@ -26,7 +26,7 @@
     <string name="privacy">隐私协议</string>
     <string name="sign_out">退出登录</string>
     <string name="me">我</string>
-    <string name="u_posts">%u 个帖子</string>
+    <string name="u_posts">%1$d 个帖子</string>
     <string name="sign_in_to_nga">登录到 NGA</string>
     <string name="from_nga">来自 NGA</string>
     <string name="cancel">取消</string>
@@ -188,6 +188,7 @@
     <string name="last">最后</string>
     <string name="loading_previous_page">正在加载上一页</string>
     <string name="load_page_d">加载第 %1$d 页</string>
+    <string name="load_first_page">回到首页</string>
     <string name="accounts">账号</string>
     <string name="add_account">添加账号</string>
     <string name="multiple_accounts">多账号</string>
@@ -246,7 +247,7 @@
     <string name="topic_cache">话题缓存</string>
     <string name="are_you_sure_to_clear_the_cache">您确定要清除缓存吗？</string>
     <string name="this_will_take_a_while">这将花费一段时间。</string>
-    <string name="llu_items">%llu 项</string>
+    <string name="llu_items">%1$d 项</string>
     <string name="clear">清除</string>
     <string name="view_attachment">查看附件</string>
     <string name="attachments">附件</string>
@@ -340,6 +341,7 @@
     <string name="add_to_new_folder">添加到新收藏夹</string>
     <string name="resume_reading_progress">恢复阅读进度</string>
     <string name="refresh_button">刷新按钮</string>
+    <string name="swipe_to_favorite">滑动收藏</string>
     <string name="blocked_topics_style">屏蔽话题样式</string>
     <string name="redact_subject">遮盖标题</string>
     <string name="hide_topic">隐藏话题</string>
