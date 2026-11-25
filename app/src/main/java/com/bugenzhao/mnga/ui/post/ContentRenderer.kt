@@ -2,33 +2,35 @@ package com.bugenzhao.mnga.ui.post
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountBox
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,9 +48,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -60,6 +68,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
@@ -168,6 +177,7 @@ internal data class StyleSpec(
     val underline: Boolean = false,
     val strikethrough: Boolean = false,
     val monospace: Boolean = false,
+    val baselineShift: BaselineShift? = null,
 )
 
 /** One inline element of a text paragraph. */
@@ -273,7 +283,7 @@ internal class ContentCombiner(
     companion object {
         private const val UNDERLINE = 1
         private const val STRIKETHROUGH = 1 shl 1
-        private val ignoredTags = setOf("font")
+        private val ignoredTags = setOf("font", "stripbr")
         private val durationRegex = Regex("""duration=([^&]+)""", RegexOption.IGNORE_CASE)
     }
 
@@ -283,6 +293,7 @@ internal class ContentCombiner(
     private var pendingClick: ClickAction? = null
 
     val font: StyleSpec? get() = fontModifier(parent?.font ?: rootStyle)
+    private val baseRootStyle: StyleSpec? get() = rootStyle ?: parent?.baseRootStyle
     private val color: Color? get() = colorModifier(parent?.color ?: rootStyle?.color)
     private val otherStyles: Int get() = otherStylesModifier(parent?.otherStyles ?: 0)
     val alignment: HAlign = overrideAlignment ?: parent?.alignment ?: HAlign.START
@@ -312,6 +323,7 @@ internal class ContentCombiner(
 
     private val selfId: PostId? get() = getEnv("id") as? PostId
     private val postDate: Long? get() = getEnv("postDate") as? Long
+    private val inRatingCard: Boolean get() = getEnv("inRatingCard") == true
 
     var tableContext: TableContext
         get() = getEnv("tableContext") as? TableContext ?: TableContext.NONE
@@ -423,7 +435,11 @@ internal class ContentCombiner(
             if (tableContext == TableContext.NONE && inInlineReplyQuote && results.size > 5) {
                 results.take(5)
             } else results
-        val spacing = if (inQuote) 8.dp else 12.dp
+        val spacing = when {
+            getEnv("inRatingBadge") == true -> 1.dp
+            inQuote || inRatingCard -> 8.dp
+            else -> 12.dp
+        }
         return ContentNode.Container(limited, tableContext, alignment, spacing)
     }
 
@@ -441,11 +457,13 @@ internal class ContentCombiner(
     }
 
     private fun visitPlain(plain: Span.Plain) {
-        if (!plain.text.contains("[*]")) {
-            appendPlainText(plain.text)
+        val text = plain.text
+        if (text.isEmpty()) return
+        if (!text.contains("[*]")) {
+            appendPlainText(text)
             return
         }
-        val segments = plain.text.split("[*]")
+        val segments = text.split("[*]")
         segments.forEachIndexed { index, segment ->
             if (segment.isEmpty()) return@forEachIndexed
             if (index == 0) {
@@ -522,12 +540,13 @@ internal class ContentCombiner(
 
     private fun visitTagged(tagged: Span.Tagged) {
         when {
-            tagged.tag == "_divider" || tagged.tag == "h" -> visitDivider(tagged)
+            tagged.tag == "_divider" || tagged.tag == "h" || tagged.tag == "headline" ->
+                visitDivider(tagged)
             tagged.tag == "img" -> visitImage(tagged)
             tagged.tag == "album" -> visitAlbum(tagged)
             tagged.tag == "noimg" -> visitNoimg(tagged)
             tagged.tag == "quote" -> visitQuote(tagged)
-            tagged.tag == "b" -> visitBold(tagged)
+            tagged.tag == "b" || tagged.tag == "title" -> visitBold(tagged)
             tagged.tag == "uid" -> visitUid(tagged)
             tagged.tag == "pid" -> visitPid(tagged)
             tagged.tag == "tid" -> visitTid(tagged)
@@ -538,17 +557,28 @@ internal class ContentCombiner(
             tagged.tag == "del" -> visitDeleted(tagged)
             tagged.tag == "color" -> visitColored(tagged)
             tagged.tag == "size" -> visitSized(tagged)
+            tagged.tag == "sup" -> visitBaselineShift(tagged, BaselineShift.Superscript)
+            tagged.tag == "sub" -> visitBaselineShift(tagged, BaselineShift.Subscript)
             tagged.tag == "collapse" -> visitCollapsed(tagged)
             tagged.tag == "flash" -> visitFlash(tagged)
             tagged.tag == "attach" -> visitAttach(tagged)
             tagged.tag == "list" -> visitList(tagged)
             tagged.tag == "align" -> visitAlign(tagged)
+            tagged.tag == "l" -> visitAlign(tagged, forced = HAlign.START)
+            tagged.tag == "r" -> visitAlign(tagged, forced = HAlign.END)
             tagged.tag == "table" -> visitTable(tagged)
             tagged.tag == "tr" -> visitTableRow(tagged)
             tagged.tag.startsWith("td") -> visitTableCell(tagged)
             tagged.tag == "dice" -> visitDice(tagged)
             tagged.tag == "at" -> visitAt(tagged)
             tagged.tag == "_mnga" -> visitMnga(tagged)
+            tagged.tag == "randomblock" || tagged.tag == "txt" -> visit(tagged.spansList)
+            tagged.tag == "fixsize" -> visitFixsize(tagged)
+            tagged.tag == "style" -> visitStyle(tagged)
+            tagged.tag == "comment" -> visit(tagged.spansList)
+            tagged.tag == "customachieve" -> visitCustomAchieve(tagged)
+            tagged.tag == "crypt" -> visitCrypt(tagged)
+            tagged.tag == "bili" || tagged.tag == "bilibili" -> visitBilibili(tagged)
             else -> visitDefaultTagged(tagged)
         }
     }
@@ -824,7 +854,9 @@ internal class ContentCombiner(
     }
 
     private fun visitColored(tagged: Span.Tagged) {
-        val color = tagged.attributesList.firstOrNull()?.let { ContentPalette[it] }
+        val rawColor = tagged.attributesList.firstOrNull()?.let(::parseNgaColor)
+        val hasBg = getEnv("hasStyleBg") == true
+        val color = rawColor?.takeIf { hasBg || !isLowContrastNeutral(it) }
         val combiner = ContentCombiner(host, parent = this, colorModifier = { c -> color ?: c })
         combiner.visit(tagged.spansList)
         appendBuilt(combiner.build())
@@ -832,7 +864,10 @@ internal class ContentCombiner(
 
     private fun visitSized(tagged: Span.Tagged) {
         val scale = tagged.attributesList.firstOrNull()
-            ?.trim('%')?.toDoubleOrNull() ?: 100.0
+            ?.trim('%')?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.coerceIn(10.0, 500.0)
+            ?: 100.0
         val factor = (scale / 100.0).toFloat()
         val combiner = ContentCombiner(host, parent = this, fontModifier = { f ->
             if (f == null) f else {
@@ -919,9 +954,9 @@ internal class ContentCombiner(
         rows.forEach(::appendOther)
     }
 
-    private fun visitAlign(tagged: Span.Tagged) {
+    private fun visitAlign(tagged: Span.Tagged, forced: HAlign? = null) {
         val attr = tagged.attributesList.firstOrNull()
-        val alignment = when (attr) {
+        val alignment = forced ?: when (attr) {
             "center" -> HAlign.CENTER
             "left" -> HAlign.START
             "right" -> HAlign.END
@@ -970,7 +1005,7 @@ internal class ContentCombiner(
         combiner.visit(tagged.spansList)
         val cell = combiner.build()
         appendOther(
-            ContentNode.View(weight = (colSpan ?: 1).toFloat()) {
+            ContentNode.View(weight = (colSpan ?: 1).coerceAtLeast(1).toFloat()) {
                 Box(Modifier.padding(horizontal = 8.dp)) { RenderNode(cell) }
             }
         )
@@ -991,6 +1026,354 @@ internal class ContentCombiner(
         val fn = tagged.attributesList.firstOrNull() ?: return
         if (fn != "version") return
         appendPlainText(host.appVersion)
+    }
+
+    private fun visitBaselineShift(tagged: Span.Tagged, shift: BaselineShift) {
+        val combiner = ContentCombiner(host, parent = this, fontModifier = { f ->
+            val base = f ?: StyleSpec()
+            val shrunk = if (base.fontSize == TextUnit.Unspecified) 11.sp else base.fontSize * 0.75f
+            base.copy(fontSize = shrunk, baselineShift = shift)
+        })
+        combiner.visit(tagged.spansList)
+        appendBuilt(combiner.build())
+    }
+
+    private fun isBlankSpan(span: Span): Boolean =
+        span.hasBreakLine() ||
+            (span.hasPlain() && span.plain.text.isBlank()) ||
+            (span.hasTagged() && span.tagged.tag == "comment" && span.tagged.spansList.all(::isBlankSpan))
+
+    /**
+     * Renders NGA's `[fixsize ...]` layout container. When it holds side-by-side
+     * floated `[style float left ...]` blocks, lays them out side by side.
+     */
+    private fun visitFixsize(tagged: Span.Tagged) {
+        if (tagged.spansList.all(::isBlankSpan)) return
+        val boxStyle = parseNgaStyle(tagged.complexAttributesList)
+        // Keep line breaks in any content that follows the floated siblings.
+        val floatedSpans = mutableListOf<Pair<Span.Tagged, NgaStyle>>()
+        var trailingStart = 0
+        for ((index, span) in tagged.spansList.withIndex()) {
+            if (isBlankSpan(span)) continue
+            if (!span.hasTagged() || span.tagged.tag != "style") break
+            val parsed = parseNgaStyle(span.tagged.complexAttributesList)
+            if (!parsed.floatLeft && !parsed.floatRight) break
+            floatedSpans += span.tagged to parsed
+            trailingStart = index + 1
+        }
+
+        if (floatedSpans.size >= 2) {
+            val ratingCard = floatedSpans.any { (child, _) -> findNgaScorePlaceholder(child) != null }
+            val builtCols = floatedSpans.mapNotNull { (child, childStyle) ->
+                val combiner = ContentCombiner(host, parent = this)
+                if (ratingCard) combiner.setEnvLocal("inRatingCard", true)
+                combiner.visitStyle(child)
+                combiner.build()?.let { it to childStyle }
+            }
+            val trailingCombiner = ContentCombiner(host, parent = this)
+            trailingCombiner.visit(tagged.spansList.drop(trailingStart).dropWhile(::isBlankSpan))
+            val trailingNode = trailingCombiner.build()
+
+            if (builtCols.isEmpty() && trailingNode == null) return
+            val hasCompactBadge = builtCols.any { (_, st) -> st.hasExplicitWidth || st.background != null }
+            val hasFlexColumn = builtCols.any { (_, st) -> !st.hasExplicitWidth && st.background == null }
+            val cardBg = boxStyle.background?.takeIf { !isLowContrastNeutral(it) }
+
+            appendOther(ContentNode.View(weight = 1f) {
+                val colors = MaterialTheme.colorScheme
+                val background = cardBg ?: when {
+                    !ratingCard -> colors.surfaceContainerLow
+                    colors.surface.luminance() < 0.5f -> colors.surfaceContainerHigh
+                    else -> Color(0xFFF5E8CB)
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = if (ratingCard) RectangleShape else RoundedCornerShape(12.dp),
+                    color = background,
+                    border = if (ratingCard) null else BorderStroke(
+                        1.dp,
+                        colors.outlineVariant.copy(alpha = 0.45f),
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (builtCols.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = if (ratingCard) Alignment.CenterVertically else Alignment.Top,
+                            ) {
+                                builtCols.forEach { (colNode, colStyle) ->
+                                    val isBadge = hasCompactBadge && hasFlexColumn &&
+                                        (colStyle.hasExplicitWidth || colStyle.background != null)
+                                    val columnModifier = when {
+                                        isBadge && ratingCard -> Modifier.width(108.dp)
+                                        isBadge -> Modifier.widthIn(min = 76.dp, max = 124.dp)
+                                        else -> Modifier.weight(1f)
+                                    }
+                                    Box(columnModifier) {
+                                        RenderNode(colNode)
+                                    }
+                                }
+                            }
+                        }
+                        if (trailingNode != null) {
+                            RenderNode(trailingNode)
+                        }
+                    }
+                }
+            })
+            return
+        }
+
+        // General `[fixsize]` container (e.g. forum header banners): render cleanly inside.
+        val combiner = ContentCombiner(host, parent = this)
+        combiner.visit(tagged.spansList)
+        appendBuilt(combiner.build())
+    }
+
+    /**
+     * Renders NGA's CSS-like `[style ...]` BBCode tag (`background`, `color`,
+     * `font`, `align`, `border-radius`, `dybg`, `innerHTML`).
+     */
+    private fun visitStyle(tagged: Span.Tagged) {
+        val style = parseNgaStyle(tagged.complexAttributesList)
+
+        // Dynamic background image (`dybg ...;./mon_...png`).
+        style.dybgUrl?.let { rawUrl ->
+            URLs.attachmentURL(rawUrl)?.let { url ->
+                val onlyThumbs = inQuote && replyTo != null
+                appendOther(ContentImageViewNode(url, onlyThumbs, allImages))
+            }
+        }
+
+        val score = if (style.background != null) findNgaScorePlaceholder(tagged) else null
+        if (score?.spansList?.all(::isBlankSpan) == true) return
+        if ((inRatingCard || style.innerHtmlVar != null) && tagged.spansList.all(::isBlankSpan)) return
+
+        val ratingBadge = inRatingCard && score != null
+        val hasExplicitBg = style.background != null || (getEnv("hasStyleBg") == true)
+        val effectiveColor = style.color?.takeIf { hasExplicitBg || !isLowContrastNeutral(it) }
+        val resolvedSize = style.resolvedFontSize(inRatingCard)
+
+        val fontMod: (StyleSpec?) -> StyleSpec? = { prev ->
+            val base = prev ?: StyleSpec()
+            when {
+                style.fontLevel == 0 ->
+                    (baseRootStyle ?: StyleSpec()).copy(color = effectiveColor ?: base.color)
+                resolvedSize != TextUnit.Unspecified -> base.copy(
+                    fontSize = resolvedSize,
+                    bold = base.bold || (style.isHeadingFont && !inRatingCard),
+                )
+                else -> base
+            }
+        }
+
+        val combiner = ContentCombiner(
+            host,
+            parent = this,
+            fontModifier = fontMod,
+            colorModifier = { c -> effectiveColor ?: c },
+            overrideAlignment = style.align,
+        )
+        if (style.background != null) {
+            combiner.setEnvLocal("hasStyleBg", true)
+        }
+        if (ratingBadge) combiner.setEnvLocal("inRatingBadge", true)
+        combiner.visit(tagged.spansList)
+        val built = combiner.build() ?: return
+
+        val bg = style.background
+        if (bg != null && (!isLowContrastNeutral(bg) || style.color != null)) {
+            val radius = (style.borderRadiusDp ?: 8f).dp
+            appendOther(ContentNode.View {
+                Surface(
+                    shape = RoundedCornerShape(radius),
+                    color = bg,
+                ) {
+                    Box(
+                        modifier = if (ratingBadge) {
+                            Modifier.fillMaxWidth().heightIn(min = 84.dp).padding(horizontal = 6.dp, vertical = 8.dp)
+                        } else {
+                            Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        },
+                        contentAlignment = when (style.align) {
+                            HAlign.CENTER -> Alignment.Center
+                            HAlign.END -> Alignment.CenterEnd
+                            else -> Alignment.CenterStart
+                        },
+                    ) {
+                        RenderNode(built)
+                    }
+                }
+            })
+            return
+        }
+
+        if (style.align != null && style.align != alignment) {
+            val targetAlign = style.align
+            appendOther(ContentNode.View(weight = 1f) {
+                Box(
+                    Modifier.fillMaxWidth(),
+                    contentAlignment = when (targetAlign) {
+                        HAlign.CENTER -> Alignment.Center
+                        HAlign.END -> Alignment.CenterEnd
+                        HAlign.START -> Alignment.CenterStart
+                    },
+                ) { RenderNode(built) }
+            })
+            return
+        }
+
+        appendBuilt(built)
+    }
+
+    /** Renders NGA's `[customachieve][title]...[/title][txt]...[/txt][img]...[/img][/customachieve]`. */
+    private fun visitCustomAchieve(tagged: Span.Tagged) {
+        var titleSpan: Span.Tagged? = null
+        var txtSpan: Span.Tagged? = null
+        var imgUrl: String? = null
+        val extras = mutableListOf<Span>()
+        for (span in tagged.spansList) {
+            if (span.hasTagged()) {
+                when (span.tagged.tag) {
+                    "title" -> titleSpan = span.tagged
+                    "txt" -> txtSpan = span.tagged
+                    "img" -> imgUrl = firstPlainText(span.tagged)?.let(URLs::attachmentURL)
+                    else -> extras += span
+                }
+            } else if (!isBlankSpan(span)) {
+                extras += span
+            }
+        }
+        if (titleSpan == null && txtSpan == null && imgUrl == null) {
+            visit(tagged.spansList)
+            return
+        }
+        val titleNode = titleSpan?.let {
+            ContentCombiner(host, parent = this, fontModifier = { f ->
+                (f ?: StyleSpec()).copy(fontSize = 15.sp, bold = true)
+            }).apply { visit(it.spansList) }.build()
+        }
+        val txtNode = txtSpan?.let {
+            ContentCombiner(
+                host,
+                parent = this,
+                fontModifier = { f -> (f ?: StyleSpec()).copy(fontSize = FOOTNOTE, bold = false) },
+                colorModifier = { host.secondary },
+            ).apply { visit(it.spansList) }.build()
+        }
+        val extraNode = if (extras.isNotEmpty()) {
+            ContentCombiner(host, parent = this).apply { visit(extras) }.build()
+        } else null
+
+        appendOther(ContentNode.View(weight = 1f) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (imgUrl != null) {
+                        Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp))) {
+                            ContentImageView(
+                                url = imgUrl,
+                                onlyThumbs = true,
+                                siblingUrls = allImages,
+                                onViewImage = { urls, current -> host.actions.viewImages(urls, current) },
+                            )
+                        }
+                    } else {
+                        Surface(
+                            modifier = Modifier.size(40.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Outlined.EmojiEvents,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (titleNode != null) RenderNode(titleNode)
+                        if (txtNode != null) RenderNode(txtNode)
+                        if (extraNode != null) RenderNode(extraNode)
+                    }
+                }
+            }
+        })
+    }
+
+    /** Renders NGA's `[crypt]...[/crypt]` encrypted text block cleanly. */
+    private fun visitCrypt(tagged: Span.Tagged) {
+        val combiner = ContentCombiner(
+            host,
+            parent = this,
+            fontModifier = { StyleSpec(fontSize = FOOTNOTE, monospace = true) },
+            colorModifier = { host.secondary },
+        )
+        combiner.visit(tagged.spansList)
+        val body = combiner.build() ?: return
+        appendOther(ContentNode.View {
+            QuoteView(fullWidth = true, inQuote = inQuote) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "加密内容",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    RenderNode(body)
+                }
+            }
+        })
+    }
+
+    /** Renders `[bili]` / `[bilibili]` video tags as clickable Bilibili links. */
+    private fun visitBilibili(tagged: Span.Tagged) {
+        val raw = (tagged.attributesList.firstOrNull() ?: firstPlainText(tagged))?.trim()
+        if (raw.isNullOrEmpty()) return
+        val url = when {
+            raw.startsWith("http://", true) || raw.startsWith("https://", true) -> raw
+            raw.startsWith("BV", true) || raw.startsWith("av", true) ->
+                "https://www.bilibili.com/video/$raw"
+            raw.all { it.isDigit() } -> "https://www.bilibili.com/video/av$raw"
+            else -> "https://www.bilibili.com/video/$raw"
+        }
+        val title = firstPlainText(tagged)?.takeIf { it.isNotEmpty() } ?: "Bilibili: $raw"
+        appendOther(ContentNode.View {
+            ContentButton(
+                icon = Icons.Outlined.Movie,
+                title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                inQuote = inQuote,
+                onClick = { host.open(url) },
+            )
+        })
     }
 
     private fun visitDefaultTagged(tagged: Span.Tagged) {
@@ -1065,6 +1448,7 @@ private fun toSpanStyle(spec: StyleSpec): SpanStyle = SpanStyle(
     fontWeight = if (spec.bold) FontWeight.Bold else null,
     fontStyle = if (spec.italic) androidx.compose.ui.text.font.FontStyle.Italic else null,
     fontFamily = if (spec.monospace) FontFamily.Monospace else null,
+    baselineShift = spec.baselineShift,
     textDecoration = when {
         spec.underline && spec.strikethrough ->
             TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
@@ -1228,26 +1612,60 @@ internal fun RenderNode(node: ContentNode?, clicksEnabled: Boolean = true) {
                             RenderNode(row, clicksEnabled)
                         }
                     }
-                TableContext.ROW ->
+                TableContext.ROW -> {
+                    val dividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    val dividerOffsets = remember(node.items.size) {
+                        FloatArray(maxOf(node.items.size - 1, 0))
+                    }
+                    // 不用 Modifier.height(IntrinsicSize.Max)：超长表格行（如含大量长图）
+                    // 高度超过 Compose Constraints 上限时，IntrinsicHeightNode 调用
+                    // Constraints.fixedHeight() 会直接崩溃。改为绘制阶段按列边界画竖线。
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .height(IntrinsicSize.Max),
+                            .drawWithContent {
+                                drawContent()
+                                val stroke = 1.dp.toPx()
+                                for (x in dividerOffsets) {
+                                    if (x > 0f) {
+                                        val cx = x + stroke / 2f
+                                        drawLine(
+                                            color = dividerColor,
+                                            start = Offset(cx, 0f),
+                                            end = Offset(cx, size.height),
+                                            strokeWidth = stroke,
+                                        )
+                                    }
+                                }
+                            },
                     ) {
                         node.items.forEachIndexed { index, item ->
-                            if (index > 0) {
-                                VerticalDivider(
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                                    modifier = Modifier.fillMaxHeight(),
-                                )
-                            }
-                            if (item is ContentNode.View && item.weight != null) {
-                                Box(Modifier.weight(item.weight!!)) { item.content() }
+                            val w = (item as? ContentNode.View)?.weight
+                            val base =
+                                if (item is ContentNode.View && w != null && w.isFinite() && w > 0f) {
+                                    Modifier.weight(w)
+                                } else {
+                                    Modifier
+                                }
+                            val cellModifier = if (index > 0) {
+                                base
+                                    .onPlaced { coords ->
+                                        dividerOffsets[index - 1] = coords.positionInParent().x
+                                    }
+                                    .padding(start = 1.dp)
                             } else {
-                                RenderNode(item, clicksEnabled)
+                                base
+                            }
+                            Box(cellModifier) {
+                                if (item is ContentNode.View) {
+                                    item.content()
+                                } else {
+                                    RenderNode(item, clicksEnabled)
+                                }
                             }
                         }
                     }
+                }
             }
         }
     }
@@ -1311,6 +1729,12 @@ private fun collectViewerImages(spans: List<Span>): List<String> {
                     ?.let { URLs.attachmentURL(it) }?.let { out += it }
                 "album" -> span.tagged.spansList.filter { it.hasPlain() }.forEach {
                     URLs.attachmentURL(it.plain.text)?.let { u -> out += u }
+                }
+                "style" -> {
+                    parseNgaStyle(span.tagged.complexAttributesList).dybgUrl
+                        ?.let(URLs::attachmentURL)
+                        ?.let { out += it }
+                    scan(span.tagged.spansList)
                 }
                 else -> scan(span.tagged.spansList)
             }
